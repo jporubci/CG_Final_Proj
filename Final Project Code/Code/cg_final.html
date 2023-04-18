@@ -93,10 +93,10 @@
    					moveright = true;
   				}
   				//left arrow to turn left, right arrow to turn right
-  				if (event.keyCode == 37) {
+  				if (event.key === 'ArrowLeft') {
    					turnleft = true;
   				}
-  				if (event.keyCode == 39) {
+  				if (event.key === 'ArrowRight') {
    					turnright = true;
   				}
 			});
@@ -115,11 +115,11 @@
   				if (event.key === 'd') {
   					moveright = false;
   				}
-    			if (event.keyCode === 37) {
-  					turnleft = false;
+				if (event.key === 'ArrowLeft') {
+   					turnleft = false;
   				}
-  				if (event.keyCode == 39) {
-  					turnright = false;
+  				if (event.key === 'ArrowRight') {
+   					turnright = false;
   				}
 
   				drawScene();
@@ -198,12 +198,12 @@
   				if (frontintersects.length > 0) {
   				 	if (frontintersects[0].distance < .4) {
   						camera.position.copy(prevCameraPosition);
-  						if (vz > 0) 
+  						if (vz > 0)
   							vz = 0;
   						a = false;
   					}
   				}
-  				
+
   				//check intersect to the back
   				raycaster.set(camera.position, direction.negate());
   				var backintersects = raycaster.intersectObjects(scene.children);
@@ -219,22 +219,22 @@
   				if (backintersects.length > 0) {
   				 	if (backintersects[0].distance < .4) {
   						camera.position.copy(prevCameraPosition);
-  						if (vz < 0) 
+  						if (vz < 0)
   							vz = 0;
   						b = false;
   					}
-  				}  				
+  				}
   				var c = true;
   				var d = true;
 
-  				if (leftintersects.length > 0) 
+  				if (leftintersects.length > 0)
   					if (leftintersects[0].distance < .4) {
   						camera.position.copy(prevCameraPosition);
   						if (vx < 0)
   							vx = 0;
   						c = false;
   					}
-  	
+
  				if (rightintersects.length > 0)
   					if (rightintersects[0].distance < .4) {
   						camera.position.copy(prevCameraPosition);
@@ -253,7 +253,7 @@
 				}
 				vz /= 1.2;
 				vx /= 1.2;
-				vrotate /= 1.25; 			
+				vrotate /= 1.25;
 				camera.rotation.y += vrotate;
 				renderer.render( scene, camera );
 			}
