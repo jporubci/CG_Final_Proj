@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<title>three.js css2d - label</title>
+		<link type="text/css" rel="stylesheet" href="main.css">
+		<style>
+			.label {
+				color: #FFF;
+				font-family: sans-serif;
+				padding: 2px;
+				background: rgba( 0, 0, 0, .6 );
+			}
+		</style>
+	</head>
+	<body>
+		<div id="info"><a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> css2d - label</div>
+
+		<!-- Import maps polyfill -->
+		<!-- Remove this when import maps will be widely supported -->
+		<script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+
+		<script type="importmap">
+			{
+				"imports": {
+					"three": "../build/three.module.js",
+					"three/addons/": "./jsm/"
+				}
+			}
+		</script>
+
+		<script type="module">
+
+			import * as THREE from 'three';
+
+			var raycaster = new THREE.Raycaster();
+
+			var vx = 0;
+			var vz = 0;
+
+			var prevCameraPosition;
+
+			//track what keys are currently being held down
+			var forward = false;
+			var backward = false;
+			var moveright = false;
+			var moveleft = false;
+			var turnright = false;
+			var turnleft = false;
+
+			var vrotate = 0;
+
+			var camera = new THREE.PerspectiveCamera( 70, window.innerWidth / window.innerHeight, 0.01, 10 );
+			camera.position.set(0, 0.3, 0);
+			camera.lookAt(0, 0.3, 0);
+
+			prevCameraPosition = camera.position;
+
+
+			const textureLoader = new THREE.TextureLoader();
+			const texture = textureLoader.load('/textures/wall1.png');
+
+			const scene = new THREE.Scene();
+
+			const geometry = new THREE.PlaneGeometry( 4, 4);
+			const material = new THREE.MeshNormalMaterial();
+
+
+
+			const renderer = new THREE.WebGLRenderer( { antialias: true } );
+			renderer.setSize( window.innerWidth, window.innerHeight );
+			renderer.setAnimationLoop( animation );
+			document.body.appendChild( renderer.domElement );
+
+
+			//movement
+			document.addEventListener('keydown', function(event) {
+				//w to move forward
+  				if (event.key === 'w') {
+  					forward = true;
+  				}
+  				//s to move backward
+  				if (event.key === 's') {
+   					backward = true;
+  				}
+  				//a to move left
+  				if (event.key === 'a') {
+   					moveleft = true;
+  				}
+  				//d to move right
+  			  	if (event.key === 'd') {
+   					moveright = true;
+  				}
+  				//left arrow to turn left, right arrow to turn right
+  				if (event.keyCode == 37) {
+   					turnleft = true;
+  				}
+  				if (event.keyCode == 39) {
+   					turnright = true;
+  				}
+			});
+
+			//when key is released
+			document.addEventListener('keyup', function(event) {
+  				if (event.key === 'w') {
+  					forward = false;
+  				}
+  				if (event.key === 's') {
+  					backward = false;
+  				}
+    			if (event.key === 'a') {
+  					moveleft = false;
+  				}
+  				if (event.key === 'd') {
+  					moveright = false;
+  				}
+    			if (event.keyCode === 37) {
+  					turnleft = false;
+  				}
+  				if (event.keyCode == 39) {
+  					turnright = false;
+  				}
+
+  				drawScene();
+			});
+
+			//animate
+
+			function drawScene() {
+
+				const floor = new THREE.Mesh( geometry, material );
+				floor.position.set(0, 0, 0);
+				floor.rotation.x = Math.PI / -2;
+				scene.add( floor );
+
+				const wall1 = new THREE.Mesh(geometry, material);
+				wall1.rotation.y = Math.PI / -2;
+				wall1.position.set(2, 2, 0);
+				scene.add(wall1);
+
+				const wall2 = new THREE.Mesh(geometry, material);
+				wall2.rotation.y = Math.PI / 2;
+				wall2.position.set(-2, 2, 0);
+				scene.add(wall2);
+
+				const wall3 = new THREE.Mesh(geometry, material);
+				wall3.rotation.z = Math.PI / 2;
+				wall3.position.set(0, 2, -2);
+				scene.add(wall3);
+
+				const wall4 = new THREE.Mesh(geometry, material);
+				wall4.rotation.z = Math.PI / 2;
+				wall4.rotation.x = Math.PI;
+				wall4.position.set(0, 2, 2);
+				scene.add(wall4);
+
+			}
+
+			function animation( time ) {
+
+		//		mesh.rotation.x = time / 2000;
+		//		mesh.rotation.y = time / 1000;
+
+				if (forward) {
+					vz -= .0025;
+				}
+				if (backward) {
+					vz += .0025;
+				}
+				if (moveright) {
+					vx += .0025;
+				}
+				if (moveleft) {
+					vx -= .0025;
+				}
+				if (turnright) {
+					vrotate -= .01;
+				}
+				if (turnleft) {
+					vrotate += .01;
+				}
+
+				//update camera based on movement speed
+				//need to take into account the direction the camera points
+
+				if (camera.rotation.y == 0) {
+					camera.rotation.y = .01;
+				}
+
+				var direction = new THREE.Vector3();
+  				camera.getWorldDirection(direction);
+  				raycaster.set(camera.position, direction);
+  				var frontintersects = raycaster.intersectObjects(scene.children);
+
+  				//probably need to add for moving left and right, also
+  				var a = true;
+  				if (frontintersects.length > 0) {
+  				 	if (frontintersects[0].distance < .4) {
+  						camera.position.copy(prevCameraPosition);
+  						if (vz > 0) 
+  							vz = 0;
+  						a = false;
+  					}
+  				}
+  				
+  				//check intersect to the back
+  				raycaster.set(camera.position, direction.negate());
+  				var backintersects = raycaster.intersectObjects(scene.children);
+
+  				var axis = new THREE.Vector3(0, 1, 0);
+  				raycaster.set(camera.position, direction.applyAxisAngle(axis, Math.PI / 2));
+  				var rightintersects = raycaster.intersectObjects(scene.children);
+
+  				raycaster.set(camera.position, direction.applyAxisAngle(axis, Math.PI / -1));
+  				var leftintersects = raycaster.intersectObjects(scene.children);
+
+  				var b = true;
+  				if (backintersects.length > 0) {
+  				 	if (backintersects[0].distance < .4) {
+  						camera.position.copy(prevCameraPosition);
+  						if (vz < 0) 
+  							vz = 0;
+  						b = false;
+  					}
+  				}  				
+  				var c = true;
+  				var d = true;
+
+  				if (leftintersects.length > 0) 
+  					if (leftintersects[0].distance < .4) {
+  						camera.position.copy(prevCameraPosition);
+  						if (vx < 0)
+  							vx = 0;
+  						c = false;
+  					}
+  	
+ 				if (rightintersects.length > 0)
+  					if (rightintersects[0].distance < .4) {
+  						camera.position.copy(prevCameraPosition);
+  						if (vx > 0)
+  							vx = 0;
+  						d = false;
+  					}
+
+  				if ((backward | a) & (forward | b) & (moveright | c) & (moveleft | d)) {
+  					prevCameraPosition.copy(camera.position);
+  					var theta = camera.rotation.y;
+					camera.position.z += vz * Math.cos(theta);
+					camera.position.x += vz * Math.sin(theta);
+					camera.position.x += vx * Math.cos(theta);
+					camera.position.z -= vx * Math.sin(theta);
+				}
+				vz /= 1.2;
+				vx /= 1.2;
+				vrotate /= 1.25; 			
+				camera.rotation.y += vrotate;
+				renderer.render( scene, camera );
+			}
+
+		</script>
+	</body>
+</html>
