@@ -10,7 +10,7 @@
 				color: #FFF;
 				font-family: sans-serif;
 				padding: 2px;
-				background: rgba( 0, 0, 0, .6 );
+				background: rgba( 0.0, 0.0, 0.0, 0.6 );
 			}
 		</style>
 	</head>
@@ -31,13 +31,15 @@
 		</script>
 
 		<script type="module">
+			// Simple boolean for toggling debugging. 0 = no debug, 1 = debug.
+			var debug = 1;
 
 			import * as THREE from 'three';
 
 			var raycaster = new THREE.Raycaster();
 
-			var vx = 0;
-			var vz = 0;
+			var vx = 0.0;
+			var vz = 0.0;
 
 			var prevCameraPosition;
 
@@ -49,90 +51,368 @@
 			var turnright = false;
 			var turnleft = false;
 
+			var fire_weapon = false;
+
 			var vrotate = 0;
 
-			var camera = new THREE.PerspectiveCamera( 70, window.innerWidth / window.innerHeight, 0.01, 10 );
-			camera.position.set(0, 0.3, 0);
-			camera.lookAt(0, 0.3, 0);
+			var camera = new THREE.PerspectiveCamera(90, window.innerWidth / window.innerHeight, 0.01, 10);
+			camera.position.set(0.0, 0.3, 0.0);
+			camera.lookAt(0.0, 0.3, 0.0);
 
 			prevCameraPosition = camera.position;
-
 
 			const textureLoader = new THREE.TextureLoader();
 			const texture = textureLoader.load('/textures/wall1.png');
 
 			const scene = new THREE.Scene();
 
-			const geometry = new THREE.PlaneGeometry( 4, 4);
+			const geometry = new THREE.PlaneGeometry(4.0, 4.0);
 			const material = new THREE.MeshNormalMaterial();
-
-
 
 			const renderer = new THREE.WebGLRenderer( { antialias: true } );
 			renderer.setSize( window.innerWidth, window.innerHeight );
 			renderer.setAnimationLoop( animation );
 			document.body.appendChild( renderer.domElement );
 
+			// Walls array to keep track of wall meshes for raycasting purposes.
+			var walls = [];
 
+			drawScene();
+
+			// Array of Enemy objects to keep track of enemies in scene.
+			var enemies = [];
+			// Array of Enemy Mesh objects to keep track of enemy meshes (so we can remove them from the scene when their health <= 0).
+			var enemy_bodies = [];
+
+			// Enemy class
+			class Enemy {
+				constructor(body,
+							level, base_health, base_attack, base_defense, base_speed,
+							health_scaling, attack_scaling, defense_scaling, speed_scaling) {
+								this.body = body;
+								this.level = level;
+								this.base_health = base_health;
+								this.base_attack = base_attack;
+								this.base_defense = base_defense;
+								this.base_speed = base_speed;
+								this.health_scaling = health_scaling;
+								this.attack_scaling = attack_scaling;
+								this.defense_scaling = defense_scaling;
+								this.speed_scaling = speed_scaling;
+								this.curr_hp = (1.0 + this.level * this.health_scaling) * this.base_health;
+							}
+
+				// Call this method to deal damage to an enemy. Send the output of Weapon.calc_damage(distance) as input to this method.
+				set_curr_hp(damage) {
+					// Calculates resistance to damage based on enemy's level, defense scaling (with respect to their level), and the enemy's base defense.
+					var defense_mult = (1.0 + this.level * this.defense_scaling) * this.base_defense;
+					// Decrease current health based on incoming damage and defensive multiplier.
+					this.curr_hp -= damage / defense_mult;
+					// Change visible color to reflect current health.
+					this.body.material.color.setRGB(this.curr_hp / ((1.0 + this.level * this.health_scaling) * this.base_health), 0.0, 0.0);
+
+					// This if block removes the enemy from the scene (and removes them from arrays responsible for keeping track of living enemies and their meshes) if their health <= 0.
+					if(this.curr_hp <= 0) {
+						this.curr_hp = 0;
+						if(debug) { console.log('Enemy id ' + this.body.id + ' died'); }
+						scene.remove(this.body);
+						for(let i = 0; i < enemies.length; i++) {
+							if(enemies[i] == this) {
+								enemies.splice(i, 1);
+								break;
+							}
+						}
+						for(let i = 0; i < enemy_bodies.length; i++) {
+							if(enemy_bodies[i] == this.body) {
+								enemy_bodies.splice(i, 1);
+								break;
+							}
+						}
+					}
+
+					// Returns the enemy's current health (for debugging purposes).
+					return this.curr_hp;
+				}
+			}
+
+			// This functions spawns an enemy shaped as a cube in the middle of the world.
+			function spawnEnemy() {
+				const cube_geo = new THREE.BoxGeometry( 0.3, 0.3, 0.3 );
+				const HP_color = new THREE.Color(1.0, 0.0, 0.0);
+				const lifeMaterial = new THREE.MeshBasicMaterial({
+					color: HP_color
+				});
+				const cube = new THREE.Mesh( cube_geo, lifeMaterial );
+				cube.position.set(0.0, 0.3, 0.0);
+
+				var enemy = new Enemy(cube,
+									  100.0, 100.0, 10.0, 1.0, 1.0,
+									  0.025, 0.02, 0.02, 0.0);
+
+				scene.add(cube)
+				enemies.push(enemy);
+				enemy_bodies.push(enemy.body);
+			}
+
+			// Weapon class; specifially for hitscan weapons (hitscan weapons use raycasts for hit detection and their bullets have no travel time).
+			class HitscanWeapon {
+				constructor(base_damage, falloff_mult, rampup_mult, falloff_dist, rampup_dist,
+							cooldown, ammo, reload_time, pellets_per_ammo, spread) {
+								this.base_damage = base_damage;
+								this.falloff_mult = falloff_mult;
+								this.rampup_mult = rampup_mult;
+								this.falloff_dist = falloff_dist;
+								this.rampup_dist = rampup_dist;
+								this.cooldown = cooldown; // number of frames after which weapon can fire again
+								this.curr_cd = 0.0;
+								this.ammo = ammo;
+								this.curr_ammo = ammo;
+								this.reload_time = reload_time;
+								this.curr_reload = 0.0;
+								this.pellets_per_ammo = pellets_per_ammo;
+								this.spread = spread; // spread angle in degrees ranges from plus or minus Math.acos(2 / Math.sqrt(spread * spread + 4)) * 180 / Math.PI
+							}
+
+				// This method should be called every frame. It decreases fire interval and reload timers by 1/60th of a second (aka, the frame rate).
+				cooldown_tick() {
+					if(this.curr_cd >= 0.0) {
+						this.curr_cd = Math.max(0.0, this.curr_cd - (1.0 / 60.0));
+					}
+					if(this.curr_reload >= 0.0) {
+						this.curr_reload = Math.max(0.0, this.curr_reload - (1.0 / 60.0));;
+
+						if(this.curr_reload == 0.0) {
+							this.curr_ammo = this.ammo;
+						}
+					}
+				}
+
+				// This method returns the outgoing damage received by an enemy, based on the distance between the player and the enemy.
+				// The distance modifier increases damage if you are closer to an enemy, and decreases damage if you are far away.
+				// attack_mult is just included if we ever add a Player class, or want some external damage modifiers of any kind.
+				calc_damage(distance) {
+					var attack_mult = 1.0;
+					var distance_mult = this.rampup_mult - (this.rampup_mult - this.falloff_mult) * Math.min((Math.max(this.rampup_dist, distance) - this.rampup_dist) / (this.falloff_dist - this.rampup_dist), 1.0);
+					var damage = this.base_damage * attack_mult * distance_mult;
+
+					return damage;
+				}
+			}
+
+			// Global variable for the current weapon.
+			var curr_weapon;
+			// Creates a minigun weapon :D Feel free to create others. I want to add a shotgun and other stuff.
+			var Minigun = new HitscanWeapon(9.0, 0.5, 1.5, 4.0, 0.4,
+											0.105, 200.0, 0.0, 4.0, 0.2);
+
+			// Sets the current weapon to the minigun.
+			curr_weapon = Minigun;
+
+			// Array to hold bullet traces for weapon firing visualization.
+			var tracers = [];
+
+			// This functions gets called when the player tries to fire their weapon.
+			function fireWeapon(weapon) {
+				// If the weapon isn't on cooldown due to its rate of fire, and if there is ammo, and if the weapon isn't currently reloading, then:
+				if(weapon.curr_cd == 0.0 && weapon.curr_ammo > 0.0 && weapon.curr_reload == 0.0) {
+					// Fire a number of bullets that is equal to the number of 'pellets_per_ammo' for the weapon. The minigun fires 4 bullets per single ammunition.
+					for(let i = 0; i < weapon.pellets_per_ammo; i++) {
+						// Begins calculating each bullet's direction based on the weapon's spread. Starts with the base direction of the camera.
+						var bullet_direction = new THREE.Vector3();
+						camera.getWorldDirection(bullet_direction);
+
+						// Add or subtract a random amount of radians based on the weapon's spread. This is applied in both the horizontal and vertical directions of rotation.
+						var horizontal_spread = Math.random() * 2.0 * Math.acos(2.0 / Math.sqrt(weapon.spread * weapon.spread + 4.0)) - Math.acos(2.0 / Math.sqrt(weapon.spread * weapon.spread + 4.0));
+						var vertical_spread = Math.random() * 2.0 * Math.acos(2.0 / Math.sqrt(weapon.spread * weapon.spread + 4.0)) - Math.acos(2.0 / Math.sqrt(weapon.spread * weapon.spread + 4.0));
+
+						// More complicated math.
+						bullet_direction.x = Math.sin(Math.PI + (camera.rotation.y + horizontal_spread));
+						bullet_direction.z = Math.cos(Math.PI - (camera.rotation.y + horizontal_spread));
+						bullet_direction.y = Math.sin(Math.PI + vertical_spread);
+
+						// A raycaster object for hit detection
+						var bullet_ray = new THREE.Raycaster();
+
+						bullet_ray.set(camera.position, bullet_direction);
+
+						// Calculate intersections on enemy meshes.
+						// We will only use the closest enemy intersection, because these bullets won't pierce enemies, so we only want to apply damage to the first enemy that gets hit.
+						var bodies = bullet_ray.intersectObjects(enemy_bodies);
+
+						// temp_bodies is for calculating intersections for the purposes of displaying tracer lines, to visualize the bullets in space.
+						var temp_bodies = walls.concat(enemy_bodies);
+						var tracer_endpoints = bullet_ray.intersectObjects(temp_bodies);
+
+						// Sanity check
+						if(tracer_endpoints.length > 0) {
+							// If the bullet trace's origin is the camera position, then it will appear invisible to the player.
+							// So we must offset its origin by a little, and so I make the bullet appear to come from somewhere on the player's lower body.
+							var tracer_dir = new THREE.Vector3();
+							var tracer_spawn_pos = new THREE.Vector3(camera.position.x, 0.1, camera.position.z);
+							// Gets direction in world space from Point A to Point B (Point A is the off-set origin, and Point B is the point of intersection of the ray and the object).
+							tracer_dir.subVectors(tracer_endpoints[0].point, tracer_spawn_pos).normalize();
+
+							// Create a tracer line.
+							var tracer = new THREE.ArrowHelper(tracer_dir, tracer_spawn_pos, tracer_endpoints[0].distance, 0xff0000);
+							tracers.push(tracer);
+							scene.add(tracer);
+						}
+
+						// Now let's calculate enemy damage
+						// Sanity check
+						if(bodies.length > 0) {
+							// For each enemy in our list:
+							for(let j = 0; j < enemies.length; j++) {
+								// If the enemy's mesh id is the same as the closest enemy mesh that the raycast intersected:
+								if(enemies[j].body.id == bodies[0].object.id && bodies[0].distance >= 0.0) {
+									// Calculate outgoing damage based on distance.
+									var damage = weapon.calc_damage(bodies[0].distance);
+									// Deal damage to enemy based on enemy stats.
+									var enemy_hp = enemies[j].set_curr_hp(damage);
+
+									if(debug) { console.log('Enemy\'s HP: ' + enemy_hp); }
+
+									// set_curr_hp modifies the 'enemies' array, so we need to break out of this for loop so we don't go out of bounds of the enemies array.
+									// Also, we've found our hit. So we don't need to check the other enemies anyways.
+									break;
+								}
+							}
+						}
+					}
+
+					// At this point, we've consumed 1 ammo.
+					// Set the cooldown for the weapon's rate of fire equal to its cooldown.
+					weapon.curr_cd = weapon.cooldown;
+					// Decrement weapon's ammo.
+					weapon.curr_ammo--;
+
+					// Check if weapon needs to reload.
+					if(weapon.curr_ammmo == 0.0) {
+						// If so, begin reload automatically.
+						weapon.curr_reload = weapon.reload_time;
+					}
+				}
+			} // This is the end of the fireWeapon() function.
+
+
+			// For the keydown and keyup stuff, I made some modifications. Is it redundant? Yes. But did it fix some weird problems I ran into? Yes.
+			// So even if it's not optimal, I think it's just best to leave it the way it is, as wacky and weird as it is.
+			var spawnEnemyBool = false;
 			//movement
 			document.addEventListener('keydown', function(event) {
 				//w to move forward
   				if (event.key === 'w') {
-  					forward = true;
+  					if(!forward) {
+						forward = true;
+						if(debug) { console.log('w pressed'); }
+					}
   				}
   				//s to move backward
   				if (event.key === 's') {
-   					backward = true;
+   					if(!backward) {
+						backward = true;
+						if(debug) { console.log('s pressed'); }
+					}
   				}
   				//a to move left
   				if (event.key === 'a') {
-   					moveleft = true;
+   					if(!moveleft) {
+						moveleft = true;
+						if(debug) { console.log('a pressed'); }
+					}
   				}
   				//d to move right
   			  	if (event.key === 'd') {
-   					moveright = true;
+   					if(!moveright) {
+						moveright = true;
+						if(debug) { console.log('d pressed'); }
+					}
   				}
   				//left arrow to turn left, right arrow to turn right
-  				if (event.key === 'ArrowLeft') {
-   					turnleft = true;
+  				if (event.key === 'j') {
+   					if(!turnleft) {
+						turnleft = true;
+						if(debug) { console.log('j pressed'); }
+					}
   				}
-  				if (event.key === 'ArrowRight') {
-   					turnright = true;
+  				if (event.key === 'l') {
+   					if(!turnright) {
+						turnright = true;
+						if(debug) { console.log('l pressed'); }
+					}
   				}
+
+				if(event.key === 'o') {
+					if(!spawnEnemyBool) {
+						spawnEnemy();
+						if(debug) {
+							console.log('enemy spawned');
+							console.log('enemy list: ' + enemies.length);
+						}
+						spawnEnemyBool = true;
+					}
+				}
+
+				// SHOOTING
+				if(event.key === 'f') {
+					if(!fire_weapon) {
+						fire_weapon = true;
+						if(debug) { console.log('start firing'); }
+					}
+				}
 			});
 
 			//when key is released
 			document.addEventListener('keyup', function(event) {
   				if (event.key === 'w') {
-  					forward = false;
+  					if(forward) {
+						forward = false;
+					}
   				}
   				if (event.key === 's') {
-  					backward = false;
+  					if(backward) {
+						backward = false;
+					}
   				}
     			if (event.key === 'a') {
-  					moveleft = false;
+  					if(moveleft) {
+						moveleft = false;
+					}
   				}
   				if (event.key === 'd') {
-  					moveright = false;
+  					if(moveright) {
+						moveright = false;
+					}
   				}
-				if (event.key === 'ArrowLeft') {
-   					turnleft = false;
+				if (event.key === 'j') {
+   					if(turnleft) {
+						turnleft = false;
+					}
   				}
-  				if (event.key === 'ArrowRight') {
-   					turnright = false;
+  				if (event.key === 'l') {
+   					if(turnright) {
+						turnright = false;
+					}
   				}
-
-  				drawScene();
+				if(event.key === 'f') {
+					if(fire_weapon) {
+						fire_weapon = false;
+						if(debug) { console.log('stop firing'); }
+					}
+				}
+				if(event.key === 'o') {
+					if(spawnEnemyBool) {
+						spawnEnemyBool = false;
+					}
+				}
 			});
 
 			//animate
-
 			function drawScene() {
-
 				const floor = new THREE.Mesh( geometry, material );
 				floor.position.set(0, 0, 0);
 				floor.rotation.x = Math.PI / -2;
-				scene.add( floor );
+				scene.add(floor);
 
 				const wall1 = new THREE.Mesh(geometry, material);
 				wall1.rotation.y = Math.PI / -2;
@@ -155,45 +435,64 @@
 				wall4.position.set(0, 2, 2);
 				scene.add(wall4);
 
+				// Add walls to the walls array.
+				walls.push(wall1);
+				walls.push(wall2);
+				walls.push(wall3);
+				walls.push(wall4);
 			}
 
-			function animation( time ) {
+			// This function runs each frame, I think.
+			function animation(time) {
+				// mesh.rotation.x = time / 2000;
+				// mesh.rotation.y = time / 1000;
 
-		//		mesh.rotation.x = time / 2000;
-		//		mesh.rotation.y = time / 1000;
+				// This function needs to be called each frame.
+				curr_weapon.cooldown_tick();
+
+				// Remove tracers from scene each frame.
+				if(tracers.length > 0) {
+					scene.remove(tracers.pop());
+				}
+
+				// If the player is trying to fire their weapon, call the function.
+				if(fire_weapon) {
+					fireWeapon(curr_weapon);
+				}
 
 				if (forward) {
-					vz -= .0025;
+					vz -= 0.0025;
 				}
 				if (backward) {
-					vz += .0025;
+					vz += 0.0025;
 				}
 				if (moveright) {
-					vx += .0025;
+					vx += 0.0025;
 				}
 				if (moveleft) {
-					vx -= .0025;
+					vx -= 0.0025;
 				}
 				if (turnright) {
-					vrotate -= .01;
+					vrotate -= 0.01;
 				}
 				if (turnleft) {
-					vrotate += .01;
+					vrotate += 0.01;
 				}
 
 				//update camera based on movement speed
 				//need to take into account the direction the camera points
-
-				if (camera.rotation.y == 0) {
-					camera.rotation.y = .01;
+				/*
+				if (camera.rotation.y == 0.0) {
+					camera.rotation.y = 0.01;
 				}
+				*/
 
 				var direction = new THREE.Vector3();
-  				camera.getWorldDirection(direction);
-  				raycaster.set(camera.position, direction);
-  				var frontintersects = raycaster.intersectObjects(scene.children);
+				camera.getWorldDirection(direction);
+				raycaster.set(camera.position, direction);
+				var frontintersects = raycaster.intersectObjects(walls);
 
-  				//probably need to add for moving left and right, also
+				//probably need to add for moving left and right, also
   				var a = true;
   				if (frontintersects.length > 0) {
   				 	if (frontintersects[0].distance < .4) {
@@ -206,14 +505,14 @@
 
   				//check intersect to the back
   				raycaster.set(camera.position, direction.negate());
-  				var backintersects = raycaster.intersectObjects(scene.children);
+  				var backintersects = raycaster.intersectObjects(walls);
 
   				var axis = new THREE.Vector3(0, 1, 0);
   				raycaster.set(camera.position, direction.applyAxisAngle(axis, Math.PI / 2));
-  				var rightintersects = raycaster.intersectObjects(scene.children);
+  				var rightintersects = raycaster.intersectObjects(walls);
 
   				raycaster.set(camera.position, direction.applyAxisAngle(axis, Math.PI / -1));
-  				var leftintersects = raycaster.intersectObjects(scene.children);
+  				var leftintersects = raycaster.intersectObjects(walls);
 
   				var b = true;
   				if (backintersects.length > 0) {
@@ -257,7 +556,6 @@
 				camera.rotation.y += vrotate;
 				renderer.render( scene, camera );
 			}
-
 		</script>
 	</body>
 </html>
