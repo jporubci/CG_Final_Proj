@@ -21,11 +21,13 @@
 		<!-- Remove this when import maps will be widely supported -->
 		<script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
 
+
 		<script type="importmap">
 			{
 				"imports": {
 					"three": "../build/three.module.js",
-					"three/addons/": "./jsm/"
+					"three/addons/": "./jsm/",
+					"OBJLoader": "../Code/jsm/loaders/OBJLoader.js"
 				}
 			}
 		</script>
@@ -35,11 +37,16 @@
 			var debug = 1;
 
 			import * as THREE from 'three';
+			import {OBJLoader} from 'OBJLoader';
 
 			var raycaster = new THREE.Raycaster();
 
+			var loader = new OBJLoader;
+
 			var vx = 0.0;
 			var vz = 0.0;
+
+			var bobbing = 0.0;
 
 			var prevCameraPosition;
 
@@ -55,7 +62,7 @@
 
 			var vrotate = 0;
 
-			var camera = new THREE.PerspectiveCamera(90, window.innerWidth / window.innerHeight, 0.01, 10);
+			var camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 10);
 			camera.position.set(0.0, 0.3, 0.0);
 			camera.lookAt(0.0, 0.3, 0.0);
 
@@ -137,7 +144,28 @@
 
 			// This functions spawns an enemy shaped as a cube in the middle of the world.
 			function spawnEnemy() {
-				const cube_geo = new THREE.BoxGeometry( 0.3, 0.3, 0.3 );
+				loader.load('../spider.obj', 
+					function(obj) {
+						obj.scale.set(0.25,0.3,0.25);
+						obj.position.set(0,.18,0);
+
+						const HP_color = new THREE.Color(1.0, 1.0, 0.0);
+						const lifeMaterial = new THREE.MeshBasicMaterial({
+							color: HP_color
+						});
+						const geometry = obj.children[0].geometry;
+
+						const spider = new THREE.Mesh(geometry, lifeMaterial);
+						var enemy = new Enemy(spider,
+									  100.0, 100.0, 10.0, 1.0, 1.0,
+									  0.025, 0.02, 0.02, 0.0);
+
+						scene.add(obj);
+						enemies.push(enemy);
+						enemy_bodies.push(enemy.body);
+					}
+				);
+		/*		const cube_geo = new THREE.BoxGeometry( 0.3, 0.3, 0.3 );
 				const HP_color = new THREE.Color(1.0, 0.0, 0.0);
 				const lifeMaterial = new THREE.MeshBasicMaterial({
 					color: HP_color
@@ -151,7 +179,7 @@
 
 				scene.add(cube)
 				enemies.push(enemy);
-				enemy_bodies.push(enemy.body);
+				enemy_bodies.push(enemy.body);*/
 			}
 
 			// Weapon class; specifially for hitscan weapons (hitscan weapons use raycasts for hit detection and their bullets have no travel time).
@@ -432,6 +460,7 @@
 				const wall4 = new THREE.Mesh(geometry, material);
 				wall4.rotation.z = Math.PI / 2;
 				wall4.rotation.x = Math.PI;
+		//		wall4.rotation.y = Math.PI / 2.5;
 				wall4.position.set(0, 2, 2);
 				scene.add(wall4);
 
@@ -440,6 +469,7 @@
 				walls.push(wall2);
 				walls.push(wall3);
 				walls.push(wall4);
+					
 			}
 
 			// This function runs each frame, I think.
@@ -450,6 +480,10 @@
 				// This function needs to be called each frame.
 				curr_weapon.cooldown_tick();
 
+				if (vz < .0001 & vz > -.0001)
+					vz = 0;
+				if (vx < .0001 & vx > .0001)
+					vx = 0;
 				// Remove tracers from scene each frame.
 				if(tracers.length > 0) {
 					scene.remove(tracers.pop());
@@ -479,6 +513,7 @@
 					vrotate += 0.01;
 				}
 
+				console.log(vz);
 				//update camera based on movement speed
 				//need to take into account the direction the camera points
 				/*
@@ -492,12 +527,11 @@
 				raycaster.set(camera.position, direction);
 				var frontintersects = raycaster.intersectObjects(walls);
 
-				//probably need to add for moving left and right, also
   				var a = true;
   				if (frontintersects.length > 0) {
   				 	if (frontintersects[0].distance < .4) {
   						camera.position.copy(prevCameraPosition);
-  						if (vz > 0)
+  						if (vz < 0)
   							vz = 0;
   						a = false;
   					}
@@ -519,7 +553,7 @@
   				 	if (backintersects[0].distance < .4) {
   						camera.position.copy(prevCameraPosition);
   						if (vz < 0)
-  							vz = 0;
+  							vz > 0;
   						b = false;
   					}
   				}
@@ -542,14 +576,32 @@
   						d = false;
   					}
 
-  				if ((backward | a) & (forward | b) & (moveright | c) & (moveleft | d)) {
-  					prevCameraPosition.copy(camera.position);
-  					var theta = camera.rotation.y;
+  				var theta = camera.rotation.y;
+
+  				//check that you're not running into a wall
+  				if (backward & b) {
+ 					prevCameraPosition.copy(camera.position);
 					camera.position.z += vz * Math.cos(theta);
-					camera.position.x += vz * Math.sin(theta);
+					camera.position.x += vz * Math.sin(theta); 					
+  				}
+
+  				if (forward & a) {
+ 					prevCameraPosition.copy(camera.position);
+					camera.position.z += vz * Math.cos(theta);
+					camera.position.x += vz * Math.sin(theta); 					
+  				}
+
+				if ((moveright | c) & (moveleft | d)) {
+					prevCameraPosition.copy(camera.position);
 					camera.position.x += vx * Math.cos(theta);
 					camera.position.z -= vx * Math.sin(theta);
 				}
+
+				if (vz > .01 || vz < -.01 || vx > .01 || vx < -.01) {
+					bobbing += .15;
+					camera.position.y = .3 + Math.cos(bobbing) / 100;
+				}
+
 				vz /= 1.2;
 				vx /= 1.2;
 				vrotate /= 1.25;
