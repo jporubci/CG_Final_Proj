@@ -47,6 +47,7 @@
 			var vz = 0.0;
 
 			var bobbing = 0.0;
+			var enemy_bobbing = 0;
 
 			var prevCameraPosition;
 
@@ -90,6 +91,11 @@
 			var enemies = [];
 			// Array of Enemy Mesh objects to keep track of enemy meshes (so we can remove them from the scene when their health <= 0).
 			var enemy_bodies = [];
+
+			//light source
+			const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+			directionalLight.position.set(0, 2, 0); // set the light's position
+			scene.add(directionalLight); 
 
 			// Enemy class
 			class Enemy {
@@ -142,25 +148,27 @@
 				}
 			}
 
-			// This functions spawns an enemy shaped as a cube in the middle of the world.
+			// This functions spawns an enemy shaped as a spider in the middle of the world.
 			function spawnEnemy() {
 				loader.load('../spider.obj', 
 					function(obj) {
-						obj.scale.set(0.25,0.3,0.25);
-						obj.position.set(0,.18,0);
 
-						const HP_color = new THREE.Color(1.0, 1.0, 0.0);
-						const lifeMaterial = new THREE.MeshBasicMaterial({
+						const HP_color = new THREE.Color(1.0, 0.0, 0.0);
+						const lifeMaterial = new THREE.MeshPhongMaterial({
 							color: HP_color
 						});
+
 						const geometry = obj.children[0].geometry;
 
 						const spider = new THREE.Mesh(geometry, lifeMaterial);
+						spider.scale.set(0.25,0.3,0.25);
+						spider.rotation.y = Math.PI / 2;
+						spider.position.set(0,.15,0);
 						var enemy = new Enemy(spider,
 									  100.0, 100.0, 10.0, 1.0, 1.0,
 									  0.025, 0.02, 0.02, 0.0);
 
-						scene.add(obj);
+						scene.add(spider);
 						enemies.push(enemy);
 						enemy_bodies.push(enemy.body);
 					}
@@ -460,7 +468,6 @@
 				const wall4 = new THREE.Mesh(geometry, material);
 				wall4.rotation.z = Math.PI / 2;
 				wall4.rotation.x = Math.PI;
-		//		wall4.rotation.y = Math.PI / 2.5;
 				wall4.position.set(0, 2, 2);
 				scene.add(wall4);
 
@@ -474,6 +481,47 @@
 
 			// This function runs each frame, I think.
 			function animation(time) {
+
+				//have enemy move toward person
+				var i = 1;
+				//loop through each enemy
+				while (i <= enemies.length) {
+ 					var enemy = enemies[i - 1];
+
+ 					//rotate the enemy to gradually face the player
+
+ 					var objPos = enemy.body.position.clone();
+ 					const camToObject = objPos.sub(camera.position);
+
+  					var angle = camToObject.angleTo(camera.getWorldDirection(new THREE.Vector3()));
+
+					var desiredRotation = Math.atan2(camToObject.x, camToObject.z) - Math.PI / 2;
+
+					var rotationDiff = (desiredRotation - enemy.body.rotation.y) % (2 * Math.PI);
+					if (rotationDiff > Math.PI) {
+					  rotationDiff -= 2 * Math.PI;
+					}
+					if (rotationDiff < -Math.PI) {
+					  rotationDiff += 2 * Math.PI;
+					}
+
+					var rotationSpeed = 0.02; 
+					if (Math.abs(rotationDiff) > rotationSpeed) {
+					  var rotationDirection = rotationDiff > 0 ? 1 : -1;
+					  enemy.body.rotation.y += rotationSpeed * rotationDirection;
+					} else {
+					  enemy.body.rotation.y = desiredRotation;
+					}
+
+					//move the enemy towards the player
+  					enemy.body.position.x += .003 * Math.sin(enemy.body.rotation.y - Math.PI / 2);
+  					enemy.body.position.z += .003 * Math.cos(enemy.body.rotation.y - Math.PI / 2);
+
+  					//slight up and down bobbing movement
+  					enemy_bobbing += .2;
+  					enemy.body.position.y = .15  + .005 * Math.sin(enemy_bobbing);
+  					i += 1;
+				}
 				// mesh.rotation.x = time / 2000;
 				// mesh.rotation.y = time / 1000;
 
@@ -597,6 +645,7 @@
 					camera.position.z -= vx * Math.sin(theta);
 				}
 
+				//up and down movement as you walk
 				if (vz > .01 || vz < -.01 || vx > .01 || vx < -.01) {
 					bobbing += .15;
 					camera.position.y = .3 + Math.cos(bobbing) / 100;
