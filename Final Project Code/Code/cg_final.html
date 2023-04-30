@@ -92,7 +92,7 @@
 
 			// Array of Enemy objects to keep track of enemies in scene.
 			var enemies = [];
-			// Array of Enemy Mesh objects to keep track of enemy meshes (so we can remove them from the scene when their health <= 0).
+			// Array of Enemy HITBOXES to keep track of enemy HITBOXES (so we can remove them from the scene when their health <= 0).
 			var enemy_bodies = [];
 			//Array of health bars, each with a respective enemy
 			var health_bars = [];
@@ -100,14 +100,16 @@
 			//light source
 			const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
 			directionalLight.position.set(0, 2, 0); // set the light's position
-			scene.add(directionalLight); 
+			scene.add(directionalLight);
 
 			// Enemy class
 			class Enemy {
-				constructor(body,
+				constructor(body, bbox, hitbox,
 							level, base_health, base_attack, base_defense, base_speed,
 							health_scaling, attack_scaling, defense_scaling, speed_scaling) {
 								this.body = body;
+                                this.bbox = bbox;
+                                this.hitbox = hitbox;
 								this.level = level;
 								this.base_health = base_health;
 								this.base_attack = base_attack;
@@ -134,6 +136,7 @@
 						this.curr_hp = 0;
 						if(debug) { console.log('Enemy id ' + this.body.id + ' died'); }
 						scene.remove(this.body);
+                        scene.remove(this.hitbox);
 						for(let i = 0; i < enemies.length; i++) {
 							if(enemies[i] == this) {
 								enemies.splice(i, 1);
@@ -143,7 +146,7 @@
 							}
 						}
 						for(let i = 0; i < enemy_bodies.length; i++) {
-							if(enemy_bodies[i] == this.body) {
+							if(enemy_bodies[i] == this.hitbox) {
 								enemy_bodies.splice(i, 1);
 								break;
 							}
@@ -157,7 +160,7 @@
 
 			//load the minigun obj file
 			function initializeWeapon() {
-				loader.load('../minigun.obj', 
+				loader.load('../minigun.obj',
 					function(obj) {
 
 						const HP_color = new THREE.Color(0.2, 0.2, 0.2);
@@ -166,12 +169,12 @@
 						});
 						const shape = obj.children[0].geometry;
 						shape.center();
-						const gun = new THREE.Mesh(shape, lifeMaterial);		
-						const centerOffset = new THREE.Vector3(0, 0, -7); 
-    					shape.translate(centerOffset.x, centerOffset.y, centerOffset.z); 
-    					gun.position.copy(centerOffset); 
+						const gun = new THREE.Mesh(shape, lifeMaterial);
+						const centerOffset = new THREE.Vector3(0, 0, -7);
+    					shape.translate(centerOffset.x, centerOffset.y, centerOffset.z);
+    					gun.position.copy(centerOffset);
 						gun.scale.set(.01, .01, .01);
-						scene.add(gun);		
+						scene.add(gun);
 						weapon.push(gun);
 					}
 				);
@@ -179,7 +182,7 @@
 
 			// This functions spawns an enemy shaped as a spider in the middle of the world.
 			function spawnEnemy() {
-				loader.load('../spider.obj', 
+				loader.load('../spider.obj',
 					function(obj) {
 
 						const HP_color = new THREE.Color(1.0, 0.0, 0.0);
@@ -188,23 +191,39 @@
 						});
 
 						const shape = obj.children[0].geometry;
+                        const spider = new THREE.Mesh(shape, lifeMaterial);
 
-						const spider = new THREE.Mesh(shape, lifeMaterial);
 						spider.scale.set(0.25,0.3,0.25);
 						spider.rotation.y = Math.PI / 2;
 						spider.position.set(0,.15,0);
-						var enemy = new Enemy(spider,
+
+                        // HITBOX
+                        const bbox = new THREE.Box3();
+                        spider.geometry.computeBoundingBox();
+                        const bbox_dims = new THREE.Vector3();
+                        bbox.getSize(bbox_dims);
+
+                        const box_geo = new THREE.BoxGeometry(bbox_dims[0], bbox_dims[1], bbox_dims[2]);
+                        const box_mat = new THREE.Material();
+                        box_mat.transparent = true;
+                        box_mat.opacity = 0.0;
+
+                        const hitbox = new THREE.Mesh(box_geo, box_mat);
+                        // end of hitbox stuff
+
+						var enemy = new Enemy(spider, bbox, hitbox,
 									  100.0, 100.0, 10.0, 1.0, 1.0,
 									  0.025, 0.02, 0.02, 0.0);
 
 						scene.add(spider);
 						enemies.push(enemy);
-						enemy_bodies.push(enemy.body);
+
+						enemy_bodies.push(enemy.hitbox);
 
 						//create a new health bar and add it to the list
 						const barMaterial = new THREE.MeshBasicMaterial({
 							color: 0xFF0000
-						});		
+						});
 						const health_bar = new THREE.Mesh(geometry, barMaterial);
 						health_bar.scale.set(0.06, 0.01);
 						health_bar.position.y = .47;
@@ -341,7 +360,7 @@
 							// For each enemy in our list:
 							for(let j = 0; j < enemies.length; j++) {
 								// If the enemy's mesh id is the same as the closest enemy mesh that the raycast intersected:
-								if(enemies[j].body.id == bodies[0].object.id && bodies[0].distance >= 0.0) {
+								if(enemies[j].hitbox.id == bodies[0].object.id && bodies[0].distance >= 0.0) {
 									// Calculate outgoing damage based on distance.
 									var damage = weapon.calc_damage(bodies[0].distance);
 									// Deal damage to enemy based on enemy stats.
@@ -517,7 +536,7 @@
 				walls.push(wall2);
 				walls.push(wall3);
 				walls.push(wall4);
-					
+
 			}
 
 			//move the health bar to track the enemy and update it's size based on health
@@ -532,7 +551,7 @@
 			}
 
 			function updateWeapon() {
-				if (weapon.length == 0) { 
+				if (weapon.length == 0) {
 					return;
 				}
 				console.log(camera.rotation.y);
@@ -552,13 +571,11 @@
 				updateWeapon();
 
 				//have enemy move toward person
-				var i = 1;
 				//loop through each enemy
-				while (i <= enemies.length) {
- 					var enemy = enemies[i - 1];
+				for(var i = 0; i < enemies.length; i++) {
+ 					var enemy = enemies[i];
 
  					//rotate the enemy to gradually face the player
-
  					var objPos = enemy.body.position.clone();
  					const camToObject = objPos.sub(camera.position);
 
@@ -574,27 +591,32 @@
 					  rotationDiff += 2 * Math.PI;
 					}
 
-					var rotationSpeed = 0.02; 
+					var rotationSpeed = 0.02;
 					if (Math.abs(rotationDiff) > rotationSpeed) {
 					  var rotationDirection = rotationDiff > 0 ? 1 : -1;
 					  enemy.body.rotation.y += rotationSpeed * rotationDirection;
+                      enemy.hitbox.rotation.y += rotationSpeed * rotationDirection;
 					} else {
 					  enemy.body.rotation.y = desiredRotation;
+                      enemy.hitbox.rotation.y = desiredRotation;
 					}
 
 					//move the enemy towards the player
   					enemy.body.position.x += .003 * Math.sin(enemy.body.rotation.y - Math.PI / 2);
   					enemy.body.position.z += .003 * Math.cos(enemy.body.rotation.y - Math.PI / 2);
+                    enemy.hitbox.position.x += .003 * Math.sin(enemy.hitbox.rotation.y - Math.PI / 2);
+  					enemy.hitbox.position.z += .003 * Math.cos(enemy.hitbox.rotation.y - Math.PI / 2);
 
   					//slight up and down bobbing movement
   					//TO DO: implement separately for multiple enemies - currently they move together
   					enemy_bobbing += .2;
   					enemy.body.position.y = .15  + .005 * Math.sin(enemy_bobbing);
+                    enemy.hitbox.position.y = .15  + .005 * Math.sin(enemy_bobbing);
 
   					//adjust health bar's rotation and position
-  					moveHealthBar(enemy, health_bars[i - 1], desiredRotation);
+  					moveHealthBar(enemy, health_bars[i], desiredRotation);
 
-  					i += 1;
+                    enemy.bbox.copy(enemy.body.geometry.boundingBox).applyMatrix4(enemy.body.matrixWorld);
 				}
 				// mesh.rotation.x = time / 2000;
 				// mesh.rotation.y = time / 1000;
@@ -704,13 +726,13 @@
   				if (backward & b) {
  					prevCameraPosition.copy(camera.position);
 					camera.position.z += vz * Math.cos(theta);
-					camera.position.x += vz * Math.sin(theta); 					
+					camera.position.x += vz * Math.sin(theta);
   				}
 
   				if (forward & a) {
  					prevCameraPosition.copy(camera.position);
 					camera.position.z += vz * Math.cos(theta);
-					camera.position.x += vz * Math.sin(theta); 					
+					camera.position.x += vz * Math.sin(theta);
   				}
 
 				if ((moveright | c) & (moveleft | d)) {
