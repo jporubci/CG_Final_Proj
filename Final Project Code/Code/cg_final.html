@@ -67,7 +67,7 @@
 			var vrotate = 0;
 
 			var camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 10);
-			camera.position.set(0.0, 0.3, 0.0);
+			camera.position.set(0.5, 0.3, 0.5);
 			camera.lookAt(0.0, 0.3, 0.0);
 
 			prevCameraPosition = camera.position;
@@ -505,13 +505,11 @@
 
 			//animate
 			function drawScene() {
-        //const geometry = new THREE.PlaneGeometry(4.0, 4.0);
-  			//const material = new THREE.MeshNormalMaterial();
         const floorGeometry = new THREE.PlaneGeometry(4.0, 4.0);
         const floorTexture = new THREE.TextureLoader().load('../floor.png');
         const floorMaterial = new THREE.MeshBasicMaterial({ map:floorTexture });
 
-        //const wallGeometry = new THREE.PlaneGeometry(4.0, 4.0)
+
         const wallTexture = new THREE.TextureLoader().load('../wall.png');
         const wallMaterial = new THREE.MeshBasicMaterial({ map:wallTexture });
 
@@ -546,6 +544,49 @@
 				walls.push(wall2);
 				walls.push(wall3);
 				walls.push(wall4);
+
+
+        //center pillar
+        const pillarGeometry = new THREE.BoxGeometry( .5, 4, .5 );
+        const pillarTexture = new THREE.TextureLoader().load('../wall.png');
+        const pillarMaterial = new THREE.MeshBasicMaterial({ map:pillarTexture });
+        const pillar1 = new THREE.Mesh( pillarGeometry, pillarMaterial );
+        scene.add( pillar1 );
+        const pillar2 = new THREE.Mesh( pillarGeometry, pillarMaterial );
+        pillar2.rotation.y = Math.PI / 4;
+        scene.add( pillar2 );
+
+
+        walls.push(pillar1);
+        walls.push(pillar2);
+
+        /*
+        const pillar1 = new THREE.Mesh(geometry, wallMaterial);
+				pillar1.rotation.y = Math.PI / -2;
+				pillar1.position.set(.25, .25, 0);
+				scene.add(pillar1);
+
+				const pillar2 = new THREE.Mesh(geometry, wallMaterial);
+				pillar2.rotation.y = Math.PI / 2;
+				pillar2.position.set(-.25, .25, 0);
+				scene.add(pillar2);
+
+				const pillar3 = new THREE.Mesh(geometry, wallMaterial);
+				//wall3.rotation.z = Math.PI / 2;
+				pillar3.position.set(0, .25, -.25);
+				scene.add(pillar3);
+
+				const pillar4 = new THREE.Mesh(geometry, wallMaterial);
+				pillar4.rotation.z = Math.PI;
+				pillar4.rotation.x = Math.PI;
+				pillar4.position.set(0, .25, .25);
+				scene.add(pillar4);
+        */
+
+        /*walls.push(pillar1);
+        walls.push(pillar2);
+        walls.push(pillar3);
+        walls.push(pillar4);*/
 
 			}
 
