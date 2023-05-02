@@ -1,0 +1,964 @@
+ <!DOCTYPE html>
+<html>
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<title>three.js css2d - label</title>
+		<link type="text/css" rel="stylesheet" href="main.css">
+		<style>
+			.label {
+				color: #FFF;
+				font-family: sans-serif;
+				padding: 2px;
+				background: rgba( 0.0, 0.0, 0.0, 0.6 );
+			}
+		</style>
+	</head>
+	<body>
+		<!-- Import maps polyfill -->
+		<!-- Remove this when import maps will be widely supported -->
+		<script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
+
+
+		<script type="importmap">
+			{
+				"imports": {
+					"three": "../build/three.module.js",
+					"three/addons/": "./jsm/",
+					"OBJLoader": "../Code/jsm/loaders/OBJLoader.js"
+				}
+			}
+		</script>
+
+		<script type="module">
+			// Simple boolean for toggling debugging. 0 = no debug, 1 = debug.
+			var debug = 0;
+
+			import * as THREE from 'three';
+			import {OBJLoader} from 'OBJLoader';
+
+			var raycaster = new THREE.Raycaster();
+
+			var loader = new OBJLoader;
+
+			var vx = 0.0;
+			var vz = 0.0;
+
+			var bobbing = 0.0;
+
+			var prevCameraPosition;
+
+			var weapon = [];
+			initializeWeapon();
+
+			//track what keys are currently being held down
+			var forward = false;
+			var backward = false;
+			var moveright = false;
+			var moveleft = false;
+			var turnright = false;
+			var turnleft = false;
+
+			var fire_weapon = false;
+
+			var vrotate = 0;
+
+			var camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 10);
+			camera.position.set(0.5, 0.3, 0.5);
+			camera.lookAt(0.0, 0.3, 0.0);
+
+			prevCameraPosition = camera.position;
+
+			const textureLoader = new THREE.TextureLoader();
+			const texture = textureLoader.load('/textures/wall1.png');
+
+			const scene = new THREE.Scene();
+
+			const geometry = new THREE.PlaneGeometry(4.0, 4.0);
+			const material = new THREE.MeshNormalMaterial();
+
+			const renderer = new THREE.WebGLRenderer( { antialias: true } );
+			renderer.setSize( window.innerWidth, window.innerHeight );
+			renderer.setAnimationLoop( animation );
+			document.body.appendChild( renderer.domElement );
+
+			// Walls array to keep track of wall meshes for raycasting purposes.
+			var walls = [];
+
+			drawScene();
+
+			// Array of Enemy objects to keep track of enemies in scene.
+			var enemies = [];
+			// Array of Enemy HITBOXES to keep track of enemy HITBOXES (so we can remove them from the scene when their health <= 0).
+			var enemy_bodies = [];
+			//Array of health bars, each with a respective enemy
+			var health_bars = [];
+
+			//light source
+			const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+			directionalLight.position.set(0, 2, 0); // set the light's position
+			scene.add(directionalLight);
+
+			// Enemy class
+			class Enemy {
+				constructor(body, hitbox,
+							level, base_health, base_attack, base_defense, base_speed,
+							health_scaling, attack_scaling, defense_scaling, speed_scaling) {
+								this.body = body;
+                                this.hitbox = hitbox;
+								this.level = level;
+								this.base_health = base_health;
+								this.base_attack = base_attack;
+								this.base_defense = base_defense;
+								this.base_speed = base_speed;
+								this.health_scaling = health_scaling;
+								this.attack_scaling = attack_scaling;
+								this.defense_scaling = defense_scaling;
+								this.speed_scaling = speed_scaling;
+								this.curr_hp = (1.0 + this.level * this.health_scaling) * this.base_health;
+                                this.bob = 0.0;
+							}
+
+				// Call this method to deal damage to an enemy. Send the output of Weapon.calc_damage(distance) as input to this method.
+				set_curr_hp(damage) {
+					// Calculates resistance to damage based on enemy's level, defense scaling (with respect to their level), and the enemy's base defense.
+					var defense_mult = (1.0 + this.level * this.defense_scaling) * this.base_defense;
+					// Decrease current health based on incoming damage and defensive multiplier.
+					this.curr_hp -= damage / defense_mult;
+					// Change visible color to reflect current health.
+					this.body.material.color.setRGB(this.curr_hp / ((1.0 + this.level * this.health_scaling) * this.base_health), 0.0, 0.0);
+
+					// This if block removes the enemy from the scene (and removes them from arrays responsible for keeping track of living enemies and their meshes) if their health <= 0.
+					if(this.curr_hp <= 0) {
+						this.curr_hp = 0;
+						if(debug) { console.log('Enemy id ' + this.body.id + ' died'); }
+						scene.remove(this.body);
+                        scene.remove(this.hitbox);
+						for(let i = 0; i < enemies.length; i++) {
+							if(enemies[i] == this) {
+								enemies.splice(i, 1);
+								health_bars[i].scale.set(0,0);
+								health_bars.splice(i, 1);
+								break;
+							}
+						}
+						for(let i = 0; i < enemy_bodies.length; i++) {
+							if(enemy_bodies[i] == this.hitbox) {
+								enemy_bodies.splice(i, 1);
+								break;
+							}
+						}
+					}
+
+					// Returns the enemy's current health (for debugging purposes).
+					return this.curr_hp;
+				}
+			}
+
+			//load the minigun obj file
+			function initializeWeapon() {
+				loader.load('../minigun.obj',
+					function(obj) {
+
+						const HP_color = new THREE.Color(0.2, 0.2, 0.2);
+						const lifeMaterial = new THREE.MeshPhongMaterial({
+							color: HP_color
+						});
+						const shape = obj.children[0].geometry;
+						shape.center();
+						const gun = new THREE.Mesh(shape, lifeMaterial);
+						const centerOffset = new THREE.Vector3(0, 0, -7);
+    					shape.translate(centerOffset.x, centerOffset.y, centerOffset.z);
+    					gun.position.copy(centerOffset);
+						gun.scale.set(.01, .01, .01);
+						scene.add(gun);
+						weapon.push(gun);
+					}
+				);
+			}
+
+			// This functions spawns an enemy shaped as a spider in the middle of the world.
+			function spawnEnemy() {
+				loader.load('../spider.obj',
+					function(obj) {
+
+						const HP_color = new THREE.Color(1.0, 0.0, 0.0);
+						const lifeMaterial = new THREE.MeshPhongMaterial({
+							color: HP_color
+						});
+
+						const shape = obj.children[0].geometry;
+                        const spider = new THREE.Mesh(shape, lifeMaterial);
+
+						spider.scale.set(0.25,0.3,0.25);
+						spider.rotation.y = Math.PI / 2;
+						spider.position.set(1,.15,0);
+
+                        /*
+                        // HITBOX
+                        const bbox = new THREE.Box3();
+                        spider.geometry.computeBoundingBox();
+                        const bbox_dims = new THREE.Vector3();
+                        bbox.getSize(bbox_dims);
+
+                        const box_geo = new THREE.BoxGeometry(bbox_dims[0], bbox_dims[1], bbox_dims[2]);
+                        const box_mat = new THREE.Material();
+                        box_mat.transparent = true;
+                        box_mat.opacity = 0.0;
+
+                        const hitbox = new THREE.Mesh(box_geo, box_mat);
+                        // end of hitbox stuff
+                        */
+
+                        const cube_geo = new THREE.BoxGeometry( 0.4, 0.35, 0.4 );
+        				const hbox_mat = new THREE.MeshBasicMaterial({
+        					//color: new THREE.Color(0.0, 0.0, 0.0),
+                            transparent: true,
+                            opacity: 0.0
+        				});
+        				const hitbox = new THREE.Mesh( cube_geo, hbox_mat );
+        				hitbox.position.set(spider.position.x, 0.15, 0.0);
+                        hitbox.rotation.y = Math.PI / 2;
+
+						var enemy = new Enemy(spider, hitbox,
+									  100.0, 100.0, 10.0, 1.0, 1.0,
+									  0.025, 0.02, 0.02, 0.0);
+
+						scene.add(spider);
+                        scene.add(enemy.hitbox);
+						enemies.push(enemy);
+
+						enemy_bodies.push(enemy.hitbox);
+
+						//create a new health bar and add it to the list
+						const barMaterial = new THREE.MeshBasicMaterial({
+							color: 0xFF0000
+						});
+						const health_bar = new THREE.Mesh(geometry, barMaterial);
+						health_bar.scale.set(0.06, 0.01);
+						health_bar.position.y = .47;
+						//health_bar.color.set(0xFF0000);
+
+						scene.add(health_bar);
+						health_bars.push(health_bar);
+					}
+				);
+		/*		const cube_geo = new THREE.BoxGeometry( 0.3, 0.3, 0.3 );
+				const HP_color = new THREE.Color(1.0, 0.0, 0.0);
+				const lifeMaterial = new THREE.MeshBasicMaterial({
+					color: HP_color
+				});
+				const cube = new THREE.Mesh( cube_geo, lifeMaterial );
+				cube.position.set(0.0, 0.3, 0.0);
+
+				var enemy = new Enemy(cube,
+									  100.0, 100.0, 10.0, 1.0, 1.0,
+									  0.025, 0.02, 0.02, 0.0);
+
+				scene.add(cube)
+				enemies.push(enemy);
+				enemy_bodies.push(enemy.body);*/
+			}
+
+			// Weapon class; specifially for hitscan weapons (hitscan weapons use raycasts for hit detection and their bullets have no travel time).
+			class HitscanWeapon {
+				constructor(base_damage, falloff_mult, rampup_mult, falloff_dist, rampup_dist,
+							cooldown, ammo, reload_time, pellets_per_ammo, spread) {
+								this.base_damage = base_damage;
+								this.falloff_mult = falloff_mult;
+								this.rampup_mult = rampup_mult;
+								this.falloff_dist = falloff_dist;
+								this.rampup_dist = rampup_dist;
+								this.cooldown = cooldown; // number of frames after which weapon can fire again
+								this.curr_cd = 0.0;
+								this.ammo = ammo;
+								this.curr_ammo = ammo;
+								this.reload_time = reload_time;
+								this.curr_reload = 0.0;
+								this.pellets_per_ammo = pellets_per_ammo;
+								this.spread = spread; // spread angle in degrees ranges from plus or minus Math.acos(2 / Math.sqrt(spread * spread + 4)) * 180 / Math.PI
+							}
+
+				// This method should be called every frame. It decreases fire interval and reload timers by 1/60th of a second (aka, the frame rate).
+				cooldown_tick() {
+					if(this.curr_cd >= 0.0) {
+						this.curr_cd = Math.max(0.0, this.curr_cd - (1.0 / 60.0));
+					}
+					if(this.curr_reload >= 0.0) {
+						this.curr_reload = Math.max(0.0, this.curr_reload - (1.0 / 60.0));;
+
+						if(this.curr_reload == 0.0) {
+							this.curr_ammo = this.ammo;
+						}
+					}
+				}
+
+				// This method returns the outgoing damage received by an enemy, based on the distance between the player and the enemy.
+				// The distance modifier increases damage if you are closer to an enemy, and decreases damage if you are far away.
+				// attack_mult is just included if we ever add a Player class, or want some external damage modifiers of any kind.
+				calc_damage(distance) {
+					var attack_mult = 1.0;
+					var distance_mult = this.rampup_mult - (this.rampup_mult - this.falloff_mult) * Math.min((Math.max(this.rampup_dist, distance) - this.rampup_dist) / (this.falloff_dist - this.rampup_dist), 1.0);
+					var damage = this.base_damage * attack_mult * distance_mult;
+
+					return damage;
+				}
+			}
+
+			// Global variable for the current weapon.
+			var curr_weapon;
+			// Creates a minigun weapon :D Feel free to create others. I want to add a shotgun and other stuff.
+			var Minigun = new HitscanWeapon(9.0, 0.5, 1.5, 4.0, 0.4,
+											0.105, 200.0, 0.0, 4.0, 0.2);
+
+			// Sets the current weapon to the minigun.
+			curr_weapon = Minigun;
+
+			// Array to hold bullet traces for weapon firing visualization.
+			var tracers = [];
+
+			// This functions gets called when the player tries to fire their weapon.
+			function fireWeapon(weapon) {
+				// If the weapon isn't on cooldown due to its rate of fire, and if there is ammo, and if the weapon isn't currently reloading, then:
+				if(weapon.curr_cd == 0.0 && weapon.curr_ammo > 0.0 && weapon.curr_reload == 0.0) {
+					// Fire a number of bullets that is equal to the number of 'pellets_per_ammo' for the weapon. The minigun fires 4 bullets per single ammunition.
+					for(let i = 0; i < weapon.pellets_per_ammo; i++) {
+						// Begins calculating each bullet's direction based on the weapon's spread. Starts with the base direction of the camera.
+						var bullet_direction = new THREE.Vector3();
+						camera.getWorldDirection(bullet_direction);
+
+						// Add or subtract a random amount of radians based on the weapon's spread. This is applied in both the horizontal and vertical directions of rotation.
+						var horizontal_spread = Math.random() * 2.0 * Math.acos(2.0 / Math.sqrt(weapon.spread * weapon.spread + 4.0)) - Math.acos(2.0 / Math.sqrt(weapon.spread * weapon.spread + 4.0));
+						var vertical_spread = Math.random() * 2.0 * Math.acos(2.0 / Math.sqrt(weapon.spread * weapon.spread + 4.0)) - Math.acos(2.0 / Math.sqrt(weapon.spread * weapon.spread + 4.0));
+
+						// More complicated math.
+						bullet_direction.x = Math.sin(Math.PI + (camera.rotation.y + horizontal_spread));
+						bullet_direction.z = Math.cos(Math.PI - (camera.rotation.y + horizontal_spread));
+						bullet_direction.y = Math.sin(Math.PI + vertical_spread);
+
+						// A raycaster object for hit detection
+						var bullet_ray = new THREE.Raycaster();
+
+						bullet_ray.set(camera.position, bullet_direction);
+
+						// Calculate intersections on enemy meshes.
+						// We will only use the closest enemy intersection, because these bullets won't pierce enemies, so we only want to apply damage to the first enemy that gets hit.
+						var bodies = bullet_ray.intersectObjects(enemy_bodies);
+
+						// temp_bodies is for calculating intersections for the purposes of displaying tracer lines, to visualize the bullets in space.
+						var temp_bodies = walls.concat(enemy_bodies);
+						var tracer_endpoints = bullet_ray.intersectObjects(temp_bodies);
+
+						// Sanity check
+						if(tracer_endpoints.length > 0) {
+							// If the bullet trace's origin is the camera position, then it will appear invisible to the player.
+							// So we must offset its origin by a little, and so I make the bullet appear to come from somewhere on the player's lower body.
+							var tracer_dir = new THREE.Vector3();
+							var tracer_spawn_pos = new THREE.Vector3(camera.position.x, 0.1, camera.position.z);
+							// Gets direction in world space from Point A to Point B (Point A is the off-set origin, and Point B is the point of intersection of the ray and the object).
+							tracer_dir.subVectors(tracer_endpoints[0].point, tracer_spawn_pos).normalize();
+                            /*
+							// Create a tracer line.
+							var tracer = new THREE.ArrowHelper(tracer_dir, tracer_spawn_pos, tracer_endpoints[0].distance, 0xff0000);
+							tracers.push(tracer);
+							scene.add(tracer);
+                            */
+
+                            console.log(tracer_dir);
+                            const boolet = new THREE.BoxGeometry( 1, 0.002, 0.002 );
+            				const boolet_mat = new THREE.MeshBasicMaterial({
+            					color: 0xe3cc00
+            				});
+            				//const tracer = new THREE.Mesh( boolet, boolet_mat );
+
+                            var width = 0.2
+                            const b = new THREE.BufferGeometry();
+                            var verts = new Float32Array([
+                                // 0, 1, 2 (Front 1)
+                                tracer_spawn_pos.x,
+                                tracer_spawn_pos.y-width/2.0,
+                                tracer_spawn_pos.z-width/2.0,
+                                tracer_spawn_pos.x,
+                                tracer_spawn_pos.y-width/2.0,
+                                tracer_spawn_pos.z+width/2.0,
+                                tracer_spawn_pos.x,
+                                tracer_spawn_pos.y+width/2.0,
+                                tracer_spawn_pos.z-width/2.0,
+
+                                // 2, 3, 1 (Front 2)
+                                tracer_spawn_pos.x,
+                                tracer_spawn_pos.y+width/2.0,
+                                tracer_spawn_pos.z-width/2.0,
+                                tracer_spawn_pos.x,
+                                tracer_spawn_pos.y+width/2.0,
+                                tracer_spawn_pos.z+width/2.0,
+                                tracer_spawn_pos.x,
+                                tracer_spawn_pos.y-width/2.0,
+                                tracer_spawn_pos.z+width/2.0,
+
+                                // 2, 3, 6 (Top 1)
+                                tracer_spawn_pos.x,
+                                tracer_spawn_pos.y+width/2.0,
+                                tracer_spawn_pos.z-width/2.0,
+                                tracer_spawn_pos.x,
+                                tracer_spawn_pos.y+width/2.0,
+                                tracer_spawn_pos.z+width/2.0,
+                                tracer_endpoints[0].point.x,
+                                tracer_endpoints[0].point.y+width/2,
+                                tracer_endpoints[0].point.z-width/2,
+
+                                // 6, 7, 3 (Top 2)
+                                tracer_endpoints[0].point.x,
+                                tracer_endpoints[0].point.y+width/2,
+                                tracer_endpoints[0].point.z-width/2,
+                                tracer_endpoints[0].point.x,
+                                tracer_endpoints[0].point.y+width/2,
+                                tracer_endpoints[0].point.z+width/2,
+                                tracer_spawn_pos.x,
+                                tracer_spawn_pos.y+width/2.0,
+                                tracer_spawn_pos.z+width/2.0,
+
+                                // 7, 3, 1 (Right 1)
+                                tracer_endpoints[0].point.x,
+                                tracer_endpoints[0].point.y+width/2,
+                                tracer_endpoints[0].point.z+width/2,
+                                tracer_spawn_pos.x,
+                                tracer_spawn_pos.y+width/2.0,
+                                tracer_spawn_pos.z+width/2.0,
+                                tracer_spawn_pos.x,
+                                tracer_spawn_pos.y-width/2.0,
+                                tracer_spawn_pos.z+width/2.0,
+
+                                // 1, 7, 5 (Right 2)
+                                tracer_spawn_pos.x,
+                                tracer_spawn_pos.y-width/2.0,
+                                tracer_spawn_pos.z+width/2.0,
+                                tracer_endpoints[0].point.x,
+                                tracer_endpoints[0].point.y+width/2,
+                                tracer_endpoints[0].point.z+width/2,
+                                tracer_endpoints[0].point.x,
+                                tracer_endpoints[0].point.y-width/2,
+                                tracer_endpoints[0].point.z+width/2,
+
+                                // 0, 2, 4 (Left 1)
+                                tracer_spawn_pos.x,
+                                tracer_spawn_pos.y-width/2.0,
+                                tracer_spawn_pos.z-width/2.0,
+                                tracer_spawn_pos.x,
+                                tracer_spawn_pos.y+width/2.0,
+                                tracer_spawn_pos.z-width/2.0,
+                                tracer_endpoints[0].point.x,
+                                tracer_endpoints[0].point.y-width/2,
+                                tracer_endpoints[0].point.z-width/2,
+
+
+                                // 2, 6, 4 (Left 2)
+                                tracer_spawn_pos.x,
+                                tracer_spawn_pos.y+width/2.0,
+                                tracer_spawn_pos.z-width/2.0,
+                                tracer_endpoints[0].point.x,
+                                tracer_endpoints[0].point.y-width/2,
+                                tracer_endpoints[0].point.z+width/2,
+                                tracer_endpoints[0].point.x,
+                                tracer_endpoints[0].point.y-width/2,
+                                tracer_endpoints[0].point.z-width/2,
+
+                                // 0, 1, 4 (Bottom 1)
+                                tracer_spawn_pos.x,
+                                tracer_spawn_pos.y-width/2.0,
+                                tracer_spawn_pos.z-width/2.0,
+                                tracer_spawn_pos.x,
+                                tracer_spawn_pos.y-width/2.0,
+                                tracer_spawn_pos.z+width/2.0,
+                                tracer_endpoints[0].point.x,
+                                tracer_endpoints[0].point.y-width/2,
+                                tracer_endpoints[0].point.z-width/2,
+
+                                // 1, 4, 5 (Bottom 2)
+                                tracer_spawn_pos.x,
+                                tracer_spawn_pos.y-width/2.0,
+                                tracer_spawn_pos.z+width/2.0,
+                                tracer_endpoints[0].point.x,
+                                tracer_endpoints[0].point.y-width/2,
+                                tracer_endpoints[0].point.z-width/2,
+                                tracer_endpoints[0].point.x,
+                                tracer_endpoints[0].point.y-width/2,
+                                tracer_endpoints[0].point.z+width/2
+                            ]);
+
+                            b.setAttribute( 'position', new THREE.BufferAttribute( verts, 3 ) );
+
+                            const tracer = new THREE.Mesh( boolet, boolet_mat );
+
+            				tracer.position.x = tracer_spawn_pos.x;
+                            tracer.position.y = tracer_spawn_pos.y;
+                            tracer.position.z = tracer_spawn_pos.z;
+                            tracer.rotation.x = Math.sin(Math.PI + (camera.rotation.y + horizontal_spread));
+    						tracer.rotation.z = Math.cos(Math.PI - (camera.rotation.y + horizontal_spread));
+    						tracer.rotation.y = Math.sin(Math.PI + vertical_spread);
+
+                            tracers.push(tracer);
+                            scene.add(tracer);
+						}
+
+						// Now let's calculate enemy damage
+						// Sanity check
+						if(bodies.length > 0) {
+							// For each enemy in our list:
+							for(let j = 0; j < enemies.length; j++) {
+								// If the enemy's mesh id is the same as the closest enemy mesh that the raycast intersected:
+								if(enemies[j].hitbox.id == bodies[0].object.id && bodies[0].distance >= 0.0) {
+									// Calculate outgoing damage based on distance.
+									var damage = weapon.calc_damage(bodies[0].distance);
+									// Deal damage to enemy based on enemy stats.
+									var enemy_hp = enemies[j].set_curr_hp(damage);
+
+									if(debug) { console.log('Enemy\'s HP: ' + enemy_hp); }
+
+									// set_curr_hp modifies the 'enemies' array, so we need to break out of this for loop so we don't go out of bounds of the enemies array.
+									// Also, we've found our hit. So we don't need to check the other enemies anyways.
+									break;
+								}
+							}
+						}
+					}
+
+					// At this point, we've consumed 1 ammo.
+					// Set the cooldown for the weapon's rate of fire equal to its cooldown.
+					weapon.curr_cd = weapon.cooldown;
+					// Decrement weapon's ammo.
+					weapon.curr_ammo--;
+
+					// Check if weapon needs to reload.
+					if(weapon.curr_ammmo == 0.0) {
+						// If so, begin reload automatically.
+						weapon.curr_reload = weapon.reload_time;
+					}
+				}
+			} // This is the end of the fireWeapon() function.
+
+
+			// For the keydown and keyup stuff, I made some modifications. Is it redundant? Yes. But did it fix some weird problems I ran into? Yes.
+			// So even if it's not optimal, I think it's just best to leave it the way it is, as wacky and weird as it is.
+			var spawnEnemyBool = false;
+			//movement
+			document.addEventListener('keydown', function(event) {
+				//w to move forward
+  				if (event.key === 'w') {
+  					if(!forward) {
+						forward = true;
+						if(debug) { console.log('w pressed'); }
+					}
+  				}
+  				//s to move backward
+  				if (event.key === 's') {
+   					if(!backward) {
+						backward = true;
+						if(debug) { console.log('s pressed'); }
+					}
+  				}
+  				//a to move left
+  				if (event.key === 'a') {
+   					if(!moveleft) {
+						moveleft = true;
+						if(debug) { console.log('a pressed'); }
+					}
+  				}
+  				//d to move right
+  			  	if (event.key === 'd') {
+   					if(!moveright) {
+						moveright = true;
+						if(debug) { console.log('d pressed'); }
+					}
+  				}
+  				//left arrow to turn left, right arrow to turn right
+  				if (event.key === 'j') {
+   					if(!turnleft) {
+						turnleft = true;
+						if(debug) { console.log('j pressed'); }
+					}
+  				}
+  				if (event.key === 'l') {
+   					if(!turnright) {
+						turnright = true;
+						if(debug) { console.log('l pressed'); }
+					}
+  				}
+
+				if(event.key === 'o') {
+					if(!spawnEnemyBool) {
+						spawnEnemy();
+						if(debug) {
+							console.log('enemy spawned');
+							console.log('enemy list: ' + enemies.length);
+						}
+						spawnEnemyBool = true;
+					}
+				}
+
+				// SHOOTING
+				if(event.key === 'f') {
+					if(!fire_weapon) {
+						fire_weapon = true;
+						if(debug) { console.log('start firing'); }
+					}
+				}
+			});
+
+			//when key is released
+			document.addEventListener('keyup', function(event) {
+  				if (event.key === 'w') {
+  					if(forward) {
+						forward = false;
+					}
+  				}
+  				if (event.key === 's') {
+  					if(backward) {
+						backward = false;
+					}
+  				}
+    			if (event.key === 'a') {
+  					if(moveleft) {
+						moveleft = false;
+					}
+  				}
+  				if (event.key === 'd') {
+  					if(moveright) {
+						moveright = false;
+					}
+  				}
+				if (event.key === 'j') {
+   					if(turnleft) {
+						turnleft = false;
+					}
+  				}
+  				if (event.key === 'l') {
+   					if(turnright) {
+						turnright = false;
+					}
+  				}
+				if(event.key === 'f') {
+					if(fire_weapon) {
+						fire_weapon = false;
+						if(debug) { console.log('stop firing'); }
+					}
+				}
+				if(event.key === 'o') {
+					if(spawnEnemyBool) {
+						spawnEnemyBool = false;
+					}
+				}
+			});
+
+			//animate
+			function drawScene() {
+                const floorGeometry = new THREE.PlaneGeometry(4.0, 4.0);
+                const floorTexture = new THREE.TextureLoader().load('../floor.png');
+                const floorMaterial = new THREE.MeshBasicMaterial({ map:floorTexture });
+
+
+                const wallTexture = new THREE.TextureLoader().load('../wall.png');
+                const wallMaterial = new THREE.MeshBasicMaterial({ map:wallTexture });
+
+                const floor = new THREE.Mesh( floorGeometry, floorMaterial );
+                floor.position.set(0, 0, 0);
+                floor.rotation.x = Math.PI / -2;
+                scene.add(floor);
+
+                const wall1 = new THREE.Mesh(geometry, wallMaterial);
+                wall1.rotation.y = Math.PI / -2;
+                wall1.position.set(2, 2, 0);
+                scene.add(wall1);
+
+                const wall2 = new THREE.Mesh(geometry, wallMaterial);
+                wall2.rotation.y = Math.PI / 2;
+                wall2.position.set(-2, 2, 0);
+                scene.add(wall2);
+
+                const wall3 = new THREE.Mesh(geometry, wallMaterial);
+                //wall3.rotation.z = Math.PI / 2;
+                wall3.position.set(0, 2, -2);
+                scene.add(wall3);
+
+                const wall4 = new THREE.Mesh(geometry, wallMaterial);
+                wall4.rotation.z = Math.PI;
+                wall4.rotation.x = Math.PI;
+                wall4.position.set(0, 2, 2);
+                scene.add(wall4);
+
+                // Add walls to the walls array.
+                walls.push(wall1);
+                walls.push(wall2);
+                walls.push(wall3);
+                walls.push(wall4);
+
+                //center pillar
+                const pillarGeometry = new THREE.BoxGeometry( .5, 4, .5 );
+                const pillarTexture = new THREE.TextureLoader().load('../wall.png');
+                const pillarMaterial = new THREE.MeshBasicMaterial({ map:pillarTexture });
+                const pillar1 = new THREE.Mesh( pillarGeometry, pillarMaterial );
+                scene.add( pillar1 );
+                const pillar2 = new THREE.Mesh( pillarGeometry, pillarMaterial );
+                pillar2.rotation.y = Math.PI / 4;
+                scene.add( pillar2 );
+
+                walls.push(pillar1);
+                walls.push(pillar2);
+
+                /*
+                const pillar1 = new THREE.Mesh(geometry, wallMaterial);
+                pillar1.rotation.y = Math.PI / -2;
+                pillar1.position.set(.25, .25, 0);
+                scene.add(pillar1);
+
+                const pillar2 = new THREE.Mesh(geometry, wallMaterial);
+                pillar2.rotation.y = Math.PI / 2;
+                pillar2.position.set(-.25, .25, 0);
+                scene.add(pillar2);
+
+                const pillar3 = new THREE.Mesh(geometry, wallMaterial);
+                //wall3.rotation.z = Math.PI / 2;
+                pillar3.position.set(0, .25, -.25);
+                scene.add(pillar3);
+
+                const pillar4 = new THREE.Mesh(geometry, wallMaterial);
+                pillar4.rotation.z = Math.PI;
+                pillar4.rotation.x = Math.PI;
+                pillar4.position.set(0, .25, .25);
+                scene.add(pillar4);
+                */
+
+                /*walls.push(pillar1);
+                walls.push(pillar2);
+                walls.push(pillar3);
+                walls.push(pillar4);*/
+
+			}
+
+			//move the health bar to track the enemy and update it's size based on health
+			function moveHealthBar(enemy, health_bar, rotateTo) {
+			  	health_bar.scale.set(0.035 * enemy.curr_hp / 100, 0.01);
+			  	console.log(enemy.curr_hp);
+  				health_bar.position.x = enemy.body.position.x;
+  				health_bar.position.z = enemy.body.position.z;
+  			  	health_bar.position.y = enemy.body.position.y + .3;
+
+  			  	health_bar.rotation.y = rotateTo - Math.PI / 2;
+			}
+
+			function updateWeapon() {
+				if (weapon.length == 0) {
+					return;
+				}
+				console.log(camera.rotation.y);
+				weapon[0].position.x = camera.position.x;
+				weapon[0].position.z = camera.position.z;
+				weapon[0].position.y = camera.position.y - .08;
+				weapon[0].rotation.y = camera.rotation.y;
+
+				if (fire_weapon) {
+					weapon[0].rotation.z += .1;
+				}
+			}
+
+            var bullet_trace_delay = 4;
+			// This function runs each frame, I think.
+			function animation(time) {
+				updateWeapon();
+
+				//have enemy move toward person
+				//loop through each enemy
+				for(var i = 0; i < enemies.length; i++) {
+ 					var enemy = enemies[i];
+
+ 					//rotate the enemy to gradually face the player
+ 					var objPos = enemy.body.position.clone();
+ 					const camToObject = objPos.sub(camera.position);
+
+  					var angle = camToObject.angleTo(camera.getWorldDirection(new THREE.Vector3()));
+
+					var desiredRotation = Math.atan2(camToObject.x, camToObject.z) - Math.PI / 2;
+
+					var rotationDiff = (desiredRotation - enemy.body.rotation.y) % (2 * Math.PI);
+					if (rotationDiff > Math.PI) {
+					  rotationDiff -= 2 * Math.PI;
+					}
+					if (rotationDiff < -Math.PI) {
+					  rotationDiff += 2 * Math.PI;
+					}
+
+					var rotationSpeed = 0.02;
+					if (Math.abs(rotationDiff) > rotationSpeed) {
+					  var rotationDirection = rotationDiff > 0 ? 1 : -1;
+					  enemy.body.rotation.y += rotationSpeed * rotationDirection;
+                      enemy.hitbox.rotation.y += rotationSpeed * rotationDirection;
+					} else {
+					  enemy.body.rotation.y = desiredRotation;
+                      enemy.hitbox.rotation.y = desiredRotation;
+					}
+
+					//move the enemy towards the player
+  					enemy.body.position.x += .003 * Math.sin(enemy.body.rotation.y - Math.PI / 2);
+  					enemy.body.position.z += .003 * Math.cos(enemy.body.rotation.y - Math.PI / 2);
+                    enemy.hitbox.position.x += .003 * Math.sin(enemy.hitbox.rotation.y - Math.PI / 2);
+  					enemy.hitbox.position.z += .003 * Math.cos(enemy.hitbox.rotation.y - Math.PI / 2);
+
+  					//slight up and down bobbing movement
+  					enemy.bob += .2;
+  					enemy.body.position.y = .15  + .005 * Math.sin(enemy.bob);
+                    enemy.hitbox.position.y = .15  + .005 * Math.sin(enemy.bob);
+
+  					//adjust health bar's rotation and position
+  					moveHealthBar(enemy, health_bars[i], desiredRotation);
+				}
+				// mesh.rotation.x = time / 2000;
+				// mesh.rotation.y = time / 1000;
+
+				// This function needs to be called each frame.
+				curr_weapon.cooldown_tick();
+
+				if (vz < .0001 & vz > -.0001)
+					vz = 0;
+				if (vx < .0001 & vx > .0001)
+					vx = 0;
+
+
+                for(var i = 0; i < tracers.length; i++) {
+                    tracers[i].position.x += 0.03 * Math.sin(tracers[i].rotation.y);
+                    tracers[i].position.z += 0.03 * Math.cos(tracers[i].rotation.y);
+                    tracers[i].position.y += 0.03 * Math.sin(tracers[i].rotation.x);
+                }
+
+				// Remove tracers from scene each frame.
+                if(bullet_trace_delay == 0) {
+    				if(tracers.length > 0) {
+    					scene.remove(tracers.pop());
+    				}
+                    bullet_trace_delay = 20;
+                } else {
+                    bullet_trace_delay -= 1;
+                }
+
+				// If the player is trying to fire their weapon, call the function.
+				if(fire_weapon) {
+					fireWeapon(curr_weapon);
+				}
+
+				if (forward) {
+					vz -= 0.0025;
+				}
+				if (backward) {
+					vz += 0.0025;
+				}
+				if (moveright) {
+					vx += 0.0025;
+				}
+				if (moveleft) {
+					vx -= 0.0025;
+				}
+				if (turnright) {
+					vrotate -= 0.01;
+				}
+				if (turnleft) {
+					vrotate += 0.01;
+				}
+
+				//console.log(vz);
+				//update camera based on movement speed
+				//need to take into account the direction the camera points
+				/*
+				if (camera.rotation.y == 0.0) {
+					camera.rotation.y = 0.01;
+				}
+				*/
+
+				var direction = new THREE.Vector3();
+				camera.getWorldDirection(direction);
+				raycaster.set(camera.position, direction);
+				var frontintersects = raycaster.intersectObjects(walls);
+
+  				var a = true;
+  				if (frontintersects.length > 0) {
+  				 	if (frontintersects[0].distance < .4) {
+  						camera.position.copy(prevCameraPosition);
+  						if (vz < 0)
+  							vz = 0;
+  						a = false;
+  					}
+  				}
+
+  				//check intersect to the back
+  				raycaster.set(camera.position, direction.negate());
+  				var backintersects = raycaster.intersectObjects(walls);
+
+  				var axis = new THREE.Vector3(0, 1, 0);
+  				raycaster.set(camera.position, direction.applyAxisAngle(axis, Math.PI / 2));
+  				var rightintersects = raycaster.intersectObjects(walls);
+
+  				raycaster.set(camera.position, direction.applyAxisAngle(axis, Math.PI / -1));
+  				var leftintersects = raycaster.intersectObjects(walls);
+
+  				var b = true;
+  				if (backintersects.length > 0) {
+  				 	if (backintersects[0].distance < .4) {
+  						camera.position.copy(prevCameraPosition);
+  						if (vz < 0)
+  							vz > 0;
+  						b = false;
+  					}
+  				}
+  				var c = true;
+  				var d = true;
+
+  				if (leftintersects.length > 0)
+  					if (leftintersects[0].distance < .4) {
+  						camera.position.copy(prevCameraPosition);
+  						if (vx < 0)
+  							vx = 0;
+  						c = false;
+  					}
+
+ 				if (rightintersects.length > 0)
+  					if (rightintersects[0].distance < .4) {
+  						camera.position.copy(prevCameraPosition);
+  						if (vx > 0)
+  							vx = 0;
+  						d = false;
+  					}
+
+  				var theta = camera.rotation.y;
+
+  				//check that you're not running into a wall
+  				if (backward & b) {
+ 					prevCameraPosition.copy(camera.position);
+					camera.position.z += vz * Math.cos(theta);
+					camera.position.x += vz * Math.sin(theta);
+  				}
+
+  				if (forward & a) {
+ 					prevCameraPosition.copy(camera.position);
+					camera.position.z += vz * Math.cos(theta);
+					camera.position.x += vz * Math.sin(theta);
+  				}
+
+				if ((moveright | c) & (moveleft | d)) {
+					prevCameraPosition.copy(camera.position);
+					camera.position.x += vx * Math.cos(theta);
+					camera.position.z -= vx * Math.sin(theta);
+				}
+
+				//up and down movement as you walk
+				if (vz > .01 || vz < -.01 || vx > .01 || vx < -.01) {
+					bobbing += .15;
+					camera.position.y = .3 + Math.cos(bobbing) / 100;
+				}
+
+				vz /= 1.2;
+				vx /= 1.2;
+				vrotate /= 1.25;
+				camera.rotation.y += vrotate;
+				renderer.render( scene, camera );
+			}
+		</script>
+	</body>
+</html>
