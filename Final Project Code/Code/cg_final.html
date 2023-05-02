@@ -47,7 +47,6 @@
 			var vz = 0.0;
 
 			var bobbing = 0.0;
-			var enemy_bobbing = 0;
 
 			var prevCameraPosition;
 
@@ -104,11 +103,10 @@
 
 			// Enemy class
 			class Enemy {
-				constructor(body, bbox, hitbox,
+				constructor(body, hitbox,
 							level, base_health, base_attack, base_defense, base_speed,
 							health_scaling, attack_scaling, defense_scaling, speed_scaling) {
 								this.body = body;
-                                this.bbox = bbox;
                                 this.hitbox = hitbox;
 								this.level = level;
 								this.base_health = base_health;
@@ -120,6 +118,7 @@
 								this.defense_scaling = defense_scaling;
 								this.speed_scaling = speed_scaling;
 								this.curr_hp = (1.0 + this.level * this.health_scaling) * this.base_health;
+                                this.bob = 0.0;
 							}
 
 				// Call this method to deal damage to an enemy. Send the output of Weapon.calc_damage(distance) as input to this method.
@@ -197,6 +196,7 @@
 						spider.rotation.y = Math.PI / 2;
 						spider.position.set(0,.15,0);
 
+                        /*
                         // HITBOX
                         const bbox = new THREE.Box3();
                         spider.geometry.computeBoundingBox();
@@ -210,12 +210,24 @@
 
                         const hitbox = new THREE.Mesh(box_geo, box_mat);
                         // end of hitbox stuff
+                        */
 
-						var enemy = new Enemy(spider, bbox, hitbox,
+                        const cube_geo = new THREE.BoxGeometry( 0.4, 0.35, 0.4 );
+        				const hbox_mat = new THREE.MeshBasicMaterial({
+        					//color: new THREE.Color(0.0, 0.0, 0.0),
+                            transparent: true,
+                            opacity: 0.0
+        				});
+        				const hitbox = new THREE.Mesh( cube_geo, hbox_mat );
+        				hitbox.position.set(0.0, 0.15, 0.0);
+                        hitbox.rotation.y = Math.PI / 2;
+
+						var enemy = new Enemy(spider, hitbox,
 									  100.0, 100.0, 10.0, 1.0, 1.0,
 									  0.025, 0.02, 0.02, 0.0);
 
 						scene.add(spider);
+                        scene.add(enemy.hitbox);
 						enemies.push(enemy);
 
 						enemy_bodies.push(enemy.hitbox);
@@ -505,88 +517,88 @@
 
 			//animate
 			function drawScene() {
-        const floorGeometry = new THREE.PlaneGeometry(4.0, 4.0);
-        const floorTexture = new THREE.TextureLoader().load('../floor.png');
-        const floorMaterial = new THREE.MeshBasicMaterial({ map:floorTexture });
+                const floorGeometry = new THREE.PlaneGeometry(4.0, 4.0);
+                const floorTexture = new THREE.TextureLoader().load('../floor.png');
+                const floorMaterial = new THREE.MeshBasicMaterial({ map:floorTexture });
 
 
-        const wallTexture = new THREE.TextureLoader().load('../wall.png');
-        const wallMaterial = new THREE.MeshBasicMaterial({ map:wallTexture });
+                const wallTexture = new THREE.TextureLoader().load('../wall.png');
+                const wallMaterial = new THREE.MeshBasicMaterial({ map:wallTexture });
 
-				const floor = new THREE.Mesh( floorGeometry, floorMaterial );
-				floor.position.set(0, 0, 0);
-				floor.rotation.x = Math.PI / -2;
-				scene.add(floor);
+                const floor = new THREE.Mesh( floorGeometry, floorMaterial );
+                floor.position.set(0, 0, 0);
+                floor.rotation.x = Math.PI / -2;
+                scene.add(floor);
 
-				const wall1 = new THREE.Mesh(geometry, wallMaterial);
-				wall1.rotation.y = Math.PI / -2;
-				wall1.position.set(2, 2, 0);
-				scene.add(wall1);
+                const wall1 = new THREE.Mesh(geometry, wallMaterial);
+                wall1.rotation.y = Math.PI / -2;
+                wall1.position.set(2, 2, 0);
+                scene.add(wall1);
 
-				const wall2 = new THREE.Mesh(geometry, wallMaterial);
-				wall2.rotation.y = Math.PI / 2;
-				wall2.position.set(-2, 2, 0);
-				scene.add(wall2);
+                const wall2 = new THREE.Mesh(geometry, wallMaterial);
+                wall2.rotation.y = Math.PI / 2;
+                wall2.position.set(-2, 2, 0);
+                scene.add(wall2);
 
-				const wall3 = new THREE.Mesh(geometry, wallMaterial);
-				//wall3.rotation.z = Math.PI / 2;
-				wall3.position.set(0, 2, -2);
-				scene.add(wall3);
+                const wall3 = new THREE.Mesh(geometry, wallMaterial);
+                //wall3.rotation.z = Math.PI / 2;
+                wall3.position.set(0, 2, -2);
+                scene.add(wall3);
 
-				const wall4 = new THREE.Mesh(geometry, wallMaterial);
-				wall4.rotation.z = Math.PI;
-				wall4.rotation.x = Math.PI;
-				wall4.position.set(0, 2, 2);
-				scene.add(wall4);
+                const wall4 = new THREE.Mesh(geometry, wallMaterial);
+                wall4.rotation.z = Math.PI;
+                wall4.rotation.x = Math.PI;
+                wall4.position.set(0, 2, 2);
+                scene.add(wall4);
 
-				// Add walls to the walls array.
-				walls.push(wall1);
-				walls.push(wall2);
-				walls.push(wall3);
-				walls.push(wall4);
-
-
-        //center pillar
-        const pillarGeometry = new THREE.BoxGeometry( .5, 4, .5 );
-        const pillarTexture = new THREE.TextureLoader().load('../wall.png');
-        const pillarMaterial = new THREE.MeshBasicMaterial({ map:pillarTexture });
-        const pillar1 = new THREE.Mesh( pillarGeometry, pillarMaterial );
-        scene.add( pillar1 );
-        const pillar2 = new THREE.Mesh( pillarGeometry, pillarMaterial );
-        pillar2.rotation.y = Math.PI / 4;
-        scene.add( pillar2 );
+                // Add walls to the walls array.
+                walls.push(wall1);
+                walls.push(wall2);
+                walls.push(wall3);
+                walls.push(wall4);
 
 
-        walls.push(pillar1);
-        walls.push(pillar2);
+                //center pillar
+                const pillarGeometry = new THREE.BoxGeometry( .5, 4, .5 );
+                const pillarTexture = new THREE.TextureLoader().load('../wall.png');
+                const pillarMaterial = new THREE.MeshBasicMaterial({ map:pillarTexture });
+                const pillar1 = new THREE.Mesh( pillarGeometry, pillarMaterial );
+                scene.add( pillar1 );
+                const pillar2 = new THREE.Mesh( pillarGeometry, pillarMaterial );
+                pillar2.rotation.y = Math.PI / 4;
+                scene.add( pillar2 );
 
-        /*
-        const pillar1 = new THREE.Mesh(geometry, wallMaterial);
-				pillar1.rotation.y = Math.PI / -2;
-				pillar1.position.set(.25, .25, 0);
-				scene.add(pillar1);
 
-				const pillar2 = new THREE.Mesh(geometry, wallMaterial);
-				pillar2.rotation.y = Math.PI / 2;
-				pillar2.position.set(-.25, .25, 0);
-				scene.add(pillar2);
+                walls.push(pillar1);
+                walls.push(pillar2);
 
-				const pillar3 = new THREE.Mesh(geometry, wallMaterial);
-				//wall3.rotation.z = Math.PI / 2;
-				pillar3.position.set(0, .25, -.25);
-				scene.add(pillar3);
+                /*
+                const pillar1 = new THREE.Mesh(geometry, wallMaterial);
+                pillar1.rotation.y = Math.PI / -2;
+                pillar1.position.set(.25, .25, 0);
+                scene.add(pillar1);
 
-				const pillar4 = new THREE.Mesh(geometry, wallMaterial);
-				pillar4.rotation.z = Math.PI;
-				pillar4.rotation.x = Math.PI;
-				pillar4.position.set(0, .25, .25);
-				scene.add(pillar4);
-        */
+                const pillar2 = new THREE.Mesh(geometry, wallMaterial);
+                pillar2.rotation.y = Math.PI / 2;
+                pillar2.position.set(-.25, .25, 0);
+                scene.add(pillar2);
 
-        /*walls.push(pillar1);
-        walls.push(pillar2);
-        walls.push(pillar3);
-        walls.push(pillar4);*/
+                const pillar3 = new THREE.Mesh(geometry, wallMaterial);
+                //wall3.rotation.z = Math.PI / 2;
+                pillar3.position.set(0, .25, -.25);
+                scene.add(pillar3);
+
+                const pillar4 = new THREE.Mesh(geometry, wallMaterial);
+                pillar4.rotation.z = Math.PI;
+                pillar4.rotation.x = Math.PI;
+                pillar4.position.set(0, .25, .25);
+                scene.add(pillar4);
+                */
+
+                /*walls.push(pillar1);
+                walls.push(pillar2);
+                walls.push(pillar3);
+                walls.push(pillar4);*/
 
 			}
 
@@ -659,15 +671,12 @@
   					enemy.hitbox.position.z += .003 * Math.cos(enemy.hitbox.rotation.y - Math.PI / 2);
 
   					//slight up and down bobbing movement
-  					//TO DO: implement separately for multiple enemies - currently they move together
-  					enemy_bobbing += .2;
-  					enemy.body.position.y = .15  + .005 * Math.sin(enemy_bobbing);
-                    enemy.hitbox.position.y = .15  + .005 * Math.sin(enemy_bobbing);
+  					enemy.bob += .2;
+  					enemy.body.position.y = .15  + .005 * Math.sin(enemy.bob);
+                    enemy.hitbox.position.y = .15  + .005 * Math.sin(enemy.bob);
 
   					//adjust health bar's rotation and position
   					moveHealthBar(enemy, health_bars[i], desiredRotation);
-
-                    enemy.bbox.copy(enemy.body.geometry.boundingBox).applyMatrix4(enemy.body.matrixWorld);
 				}
 				// mesh.rotation.x = time / 2000;
 				// mesh.rotation.y = time / 1000;
