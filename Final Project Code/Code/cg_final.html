@@ -15,8 +15,6 @@
 		</style>
 	</head>
 	<body>
-		<div id="info"><a href="https://threejs.org" target="_blank" rel="noopener">three.js</a> css2d - label</div>
-
 		<!-- Import maps polyfill -->
 		<!-- Remove this when import maps will be widely supported -->
 		<script async src="https://unpkg.com/es-module-shims@1.6.3/dist/es-module-shims.js"></script>
@@ -194,7 +192,7 @@
 
 						spider.scale.set(0.25,0.3,0.25);
 						spider.rotation.y = Math.PI / 2;
-						spider.position.set(0,.15,0);
+						spider.position.set(1,.15,0);
 
                         /*
                         // HITBOX
@@ -219,7 +217,7 @@
                             opacity: 0.0
         				});
         				const hitbox = new THREE.Mesh( cube_geo, hbox_mat );
-        				hitbox.position.set(0.0, 0.15, 0.0);
+        				hitbox.position.set(spider.position.x, 0.15, 0.0);
                         hitbox.rotation.y = Math.PI / 2;
 
 						var enemy = new Enemy(spider, hitbox,
