@@ -34,6 +34,14 @@
 			// Simple boolean for toggling debugging. 0 = no debug, 1 = debug.
 			var debug = 0;
 
+			var lives = 3;
+			var hearts = [];
+			var hearts_initialized = false;
+
+			var health_cooldown = 0;
+
+			var heart_drops = [];
+
 			import * as THREE from 'three';
 			import {OBJLoader} from 'OBJLoader';
 
@@ -67,6 +75,15 @@
 			camera.position.set(0.5, 0.3, 0.5);
 			camera.lookAt(0.0, 0.3, 0.0);
 
+			//HUD camera
+			var hud_camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 10);
+			hud_camera.position.set(0.5, 0.3, 0.5);
+			hud_camera.lookAt(0.0, 0.3, 0.0);
+			var hud_scene = new THREE.Scene();
+
+			init_health();
+
+
 			prevCameraPosition = camera.position;
 
 			const textureLoader = new THREE.TextureLoader();
@@ -81,6 +98,7 @@
 			renderer.setSize( window.innerWidth, window.innerHeight );
 			renderer.setAnimationLoop( animation );
 			document.body.appendChild( renderer.domElement );
+			renderer.autoClear = false; // to allow overlay
 
 			// Walls array to keep track of wall meshes for raycasting purposes.
 			var walls = [];
@@ -130,6 +148,30 @@
 
 					// This if block removes the enemy from the scene (and removes them from arrays responsible for keeping track of living enemies and their meshes) if their health <= 0.
 					if(this.curr_hp <= 0) {
+
+
+						loader.load(
+							'../heart.obj',
+							(obj) => {
+								const HP_color = new THREE.Color(1.0, 0.0, 0.3);
+								const mat = new THREE.MeshPhongMaterial({
+									color: HP_color
+								});
+								const shape = obj.children[0].geometry;
+								shape.center();
+
+								const heart = new THREE.Mesh(shape, mat);
+								heart.position.set(this.body.position.x, this.body.position.y + .1, this.body.position.z);
+								console.log(this.body.position.x);
+								heart.rotation.x = -Math.PI / 2;
+								heart.rotation.z = Math.PI / 2.5;
+								heart.scale.set(.01, .01, .01);;
+
+								scene.add(heart);
+								heart_drops.push(heart);
+							}
+						);
+
 						this.curr_hp = 0;
 						if(debug) { console.log('Enemy id ' + this.body.id + ' died'); }
 						scene.remove(this.body);
@@ -603,7 +645,7 @@
 			//move the health bar to track the enemy and update it's size based on health
 			function moveHealthBar(enemy, health_bar, rotateTo) {
 			  	health_bar.scale.set(0.035 * enemy.curr_hp / 100, 0.01);
-			  	console.log(enemy.curr_hp);
+		//	  	console.log(enemy.curr_hp);
   				health_bar.position.x = enemy.body.position.x;
   				health_bar.position.z = enemy.body.position.z;
   			  	health_bar.position.y = enemy.body.position.y + .3;
@@ -615,7 +657,7 @@
 				if (weapon.length == 0) {
 					return;
 				}
-				console.log(camera.rotation.y);
+			//	console.log(camera.rotation.y);
 				weapon[0].position.x = camera.position.x;
 				weapon[0].position.z = camera.position.z;
 				weapon[0].position.y = camera.position.y - .08;
@@ -624,6 +666,38 @@
 				if (fire_weapon) {
 					weapon[0].rotation.z += .1;
 				}
+			}
+
+			//draw hearts in HUD
+			function init_health() {
+				for (var i = 0; i < hearts.length; i++) {
+					hud_scene.remove(hearts[i]);
+				}
+				hearts = [];
+
+				loader.load(
+					'../heart.obj',
+					function(obj) {
+						const HP_color = new THREE.Color(1.0, 0.0, 0.0);
+						const mat = new THREE.MeshBasicMaterial({
+							color: HP_color
+						});
+						const shape = obj.children[0].geometry;
+						shape.center();
+
+						for (var i = 0; i < lives; i++) {
+							const heart = new THREE.Mesh(shape, mat);
+							heart.position.set(-2 + i / 10, 1.3 + i / 20, 0.3 - i / 3);
+							heart.rotation.x = -Math.PI / 2;
+							heart.rotation.z = Math.PI / 2.5;
+							heart.scale.set(.02 + i / 1000, .02 + i / 1000, .02 + i / 1000);
+
+							hud_scene.add(heart);
+							hearts.push(heart);
+						}
+						hearts_initialized = true;
+					}
+				);
 			}
 
 			// This function runs each frame, I think.
@@ -635,6 +709,74 @@
 				//loop through each enemy
 				for(var i = 0; i < enemies.length; i++) {
  					var enemy = enemies[i];
+
+ 					//detect if enemy is going through a wall
+ 						//shoot two rays - one from the left end of the enemy and one from the right end
+ 						//both facing forward
+ 						//realized I also need one in the middle, otherwise the two outside vectors can go completely around pillar
+ 					var collision = false;
+					var dir = new THREE.Vector3();
+
+					enemy.body.getWorldDirection(dir);
+					var axis = new THREE.Vector3(0, 1, 0);
+					dir.applyAxisAngle(axis, Math.PI / -2);
+
+					var pos = new THREE.Vector3();
+					pos.x = enemy.body.position.x - .3 * Math.sin(enemy.body.rotation.y - Math.PI);
+					pos.y = enemy.body.position.y;
+					pos.z = enemy.body.position.z - .3 * Math.cos(enemy.body.rotation.y - Math.PI);
+
+
+					raycaster.set(pos, dir);
+		//		scene.add(new THREE.ArrowHelper(raycaster.ray.direction, raycaster.ray.origin, 300, 0xff0000) );
+					var enemy_intersects_left = raycaster.intersectObjects(walls);
+
+					pos.x = enemy.body.position.x + .3 * Math.sin(enemy.body.rotation.y - Math.PI);
+					pos.z = enemy.body.position.z + .3 * Math.cos(enemy.body.rotation.y - Math.PI);
+					raycaster.set(pos, dir);
+					var enemy_intersects_right = raycaster.intersectObjects(walls);
+			//	scene.add(new THREE.ArrowHelper(raycaster.ray.direction, raycaster.ray.origin, 300, 0xff0000) );
+
+					pos.x = enemy.body.position.x;
+					pos.z = enemy.body.position.z;
+					raycaster.set(pos, dir);
+					var enemy_intersects_mid = raycaster.intersectObjects(walls);
+
+
+					var l_dis = -1;
+					var r_dis = -1;
+					if (enemy_intersects_left.length > 0) {
+						if (enemy_intersects_left[0].distance < .4) {
+							l_dis = enemy_intersects_left[0].distance;
+							collision = true;
+						}
+					}
+
+					if (enemy_intersects_right.length > 0) {
+						if (enemy_intersects_right[0].distance < .4) {
+							r_dis = enemy_intersects_right[0].distance;
+							collision = true;
+						}
+					}
+
+					if (enemy_intersects_mid.length > 0 & l_dis == -1) {
+						if (enemy_intersects_mid[0].distance < .4) {
+							l_dis = enemy_intersects_mid[0].distance;
+							collision = true;
+						} 
+					}
+
+					if (collision) {
+						//turn right
+						if (l_dis + .03 >= r_dis | l_dis == -1) {
+							enemy.body.rotation.y += .02;
+							enemy.hitbox.rotation.y += .02;
+						}
+						else {
+							enemy.body.rotation.y -= .02;
+							enemy.hitbox.rotation.y -= .02;
+						}
+					}
 
  					//rotate the enemy to gradually face the player
  					var objPos = enemy.body.position.clone();
@@ -652,22 +794,26 @@
 					  rotationDiff += 2 * Math.PI;
 					}
 
+
 					var rotationSpeed = 0.02;
-					if (Math.abs(rotationDiff) > rotationSpeed) {
-					  var rotationDirection = rotationDiff > 0 ? 1 : -1;
-					  enemy.body.rotation.y += rotationSpeed * rotationDirection;
-                      enemy.hitbox.rotation.y += rotationSpeed * rotationDirection;
-					} else {
-					  enemy.body.rotation.y = desiredRotation;
-                      enemy.hitbox.rotation.y = desiredRotation;
+					if (!collision) {
+						if (Math.abs(rotationDiff) > rotationSpeed) {
+						  var rotationDirection = rotationDiff > 0 ? 1 : -1;
+						  enemy.body.rotation.y += rotationSpeed * rotationDirection;
+	                      enemy.hitbox.rotation.y += rotationSpeed * rotationDirection;
+						} else {
+						  enemy.body.rotation.y = desiredRotation;
+	                      enemy.hitbox.rotation.y = desiredRotation;
+						}
 					}
 
 					//move the enemy towards the player
-  					enemy.body.position.x += .003 * Math.sin(enemy.body.rotation.y - Math.PI / 2);
-  					enemy.body.position.z += .003 * Math.cos(enemy.body.rotation.y - Math.PI / 2);
-                    enemy.hitbox.position.x += .003 * Math.sin(enemy.hitbox.rotation.y - Math.PI / 2);
-  					enemy.hitbox.position.z += .003 * Math.cos(enemy.hitbox.rotation.y - Math.PI / 2);
-
+					if (!collision) {
+	  					enemy.body.position.x += .003 * Math.sin(enemy.body.rotation.y - Math.PI / 2);
+	  					enemy.body.position.z += .003 * Math.cos(enemy.body.rotation.y - Math.PI / 2);
+	                    enemy.hitbox.position.x += .003 * Math.sin(enemy.hitbox.rotation.y - Math.PI / 2);
+	  					enemy.hitbox.position.z += .003 * Math.cos(enemy.hitbox.rotation.y - Math.PI / 2);
+	  				}
   					//slight up and down bobbing movement
   					enemy.bob += .2;
   					enemy.body.position.y = .15  + .005 * Math.sin(enemy.bob);
@@ -675,12 +821,48 @@
 
   					//adjust health bar's rotation and position
   					moveHealthBar(enemy, health_bars[i], desiredRotation);
+
+  					//deal damage if too close
+  					const cameraPosition = new THREE.Vector3();
+					camera.getWorldPosition(cameraPosition);
+					const distance = cameraPosition.distanceTo(enemy.body.position);
+
+					if (distance < .3 & health_cooldown == 0) {
+						hud_scene.remove(hearts.pop());
+						lives -= 1;
+						health_cooldown = 90;
+					}
 				}
+				if (health_cooldown > 0) {
+					health_cooldown -= 1;
+				}
+
+				if (hearts.length == 0 & hearts_initialized) {
+					alert("You lose!");
+					location.reload();
+				}
+
 				// mesh.rotation.x = time / 2000;
 				// mesh.rotation.y = time / 1000;
 
 				// This function needs to be called each frame.
 				curr_weapon.cooldown_tick();
+
+				for (var i = 0; i < heart_drops.length; i++) {
+					heart_drops[i].rotation.z += .05;
+
+					const cameraPosition = new THREE.Vector3();
+					camera.getWorldPosition(cameraPosition);
+					const distance = cameraPosition.distanceTo(heart_drops[i].position);
+					if (distance < .15) {
+						if (lives < 3) {
+							lives += 1;
+							init_health();
+						}
+						scene.remove(heart_drops[i]);
+						heart_drops.splice(i, 1);
+					}
+				}
 
 				if (vz < .0001 & vz > -.0001)
 					vz = 0;
@@ -809,7 +991,10 @@
 				vx /= 1.2;
 				vrotate /= 1.25;
 				camera.rotation.y += vrotate;
+
 				renderer.render( scene, camera );
+				renderer.clearDepth();
+				renderer.render(hud_scene, hud_camera);
 			}
 		</script>
 	</body>
