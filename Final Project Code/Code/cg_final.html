@@ -34,6 +34,8 @@
 			// Simple boolean for toggling debugging. 0 = no debug, 1 = debug.
 			var debug = 0;
 
+			var kills = 0;
+
 			var lives = 3;
 			var hearts = [];
 			var hearts_initialized = false;
@@ -149,7 +151,7 @@
 					// This if block removes the enemy from the scene (and removes them from arrays responsible for keeping track of living enemies and their meshes) if their health <= 0.
 					if(this.curr_hp <= 0) {
 
-
+						kills += 1;
 						loader.load(
 							'../heart.obj',
 							(obj) => {
@@ -838,7 +840,12 @@
 				}
 
 				if (hearts.length == 0 & hearts_initialized) {
-					alert("You lose!");
+					if (kills == 1) {
+						alert("You lose! You had 1 kill.");
+					}
+					else {
+						alert("You lose! You had " + kills + " kills.");
+					}
 					location.reload();
 				}
 
